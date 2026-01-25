@@ -35,7 +35,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 import config
 from base.base_crawler import AbstractStore
-from database.models import WeiboCreator, WeiboNote, WeiboNoteComment
+from database.models import WeiboCreator, WeiboNote, WeiboNoteComment, WeiboVipNote
 from tools import utils, words
 from tools.async_file_writer import AsyncFileWriter
 from database.db_session import get_session
@@ -95,6 +95,17 @@ class WeiboCsvStoreImplement(AbstractStore):
 
         """
         await self.writer.write_to_csv(item_type="creators", item=creator)
+
+    async def store_vip_content(self, vip_content_item: Dict):
+        """
+        Weibo VIP content CSV storage implementation
+        Args:
+            vip_content_item: VIP content item dict
+
+        Returns:
+
+        """
+        await self.writer.write_to_csv(item_type="vip_contents", item=vip_content_item)
 
 
 class WeiboDbStoreImplement(AbstractStore):
@@ -186,6 +197,32 @@ class WeiboDbStoreImplement(AbstractStore):
                 session.add(db_creator)
             await session.commit()
 
+    async def store_vip_content(self, vip_content_item: Dict):
+        """
+        Weibo VIP content DB storage implementation
+        Args:
+            vip_content_item: VIP content item dict
+
+        Returns:
+
+        """
+        note_id = str(vip_content_item.get("note_id", ""))
+        async with get_session() as session:
+            stmt = select(WeiboVipNote).where(WeiboVipNote.note_id == note_id)
+            res = await session.execute(stmt)
+            db_vip_note = res.scalar_one_or_none()
+            if db_vip_note:
+                db_vip_note.last_modify_ts = utils.get_current_timestamp()
+                for key, value in vip_content_item.items():
+                    if hasattr(db_vip_note, key):
+                        setattr(db_vip_note, key, value)
+            else:
+                vip_content_item["add_ts"] = utils.get_current_timestamp()
+                vip_content_item["last_modify_ts"] = utils.get_current_timestamp()
+                db_vip_note = WeiboVipNote(**vip_content_item)
+                session.add(db_vip_note)
+            await session.commit()
+
 
 class WeiboJsonStoreImplement(AbstractStore):
     def __init__(self, **kwargs):
@@ -224,6 +261,17 @@ class WeiboJsonStoreImplement(AbstractStore):
 
         """
         await self.writer.write_single_item_to_json(item_type="creators", item=creator)
+
+    async def store_vip_content(self, vip_content_item: Dict):
+        """
+        VIP content JSON storage implementation
+        Args:
+            vip_content_item:
+
+        Returns:
+
+        """
+        await self.writer.write_single_item_to_json(item_type="vip_contents", item=vip_content_item)
 
 
 class WeiboSqliteStoreImplement(WeiboDbStoreImplement):
@@ -289,6 +337,23 @@ class WeiboMongoStoreImplement(AbstractStore):
             data=creator_item
         )
         utils.logger.info(f"[WeiboMongoStoreImplement.store_creator] Saved creator {user_id} to MongoDB")
+
+    async def store_vip_content(self, vip_content_item: Dict):
+        """
+        Store VIP content to MongoDB
+        Args:
+            vip_content_item: VIP content data
+        """
+        note_id = vip_content_item.get("note_id")
+        if not note_id:
+            return
+
+        await self.mongo_store.save_or_update(
+            collection_suffix="vip_contents",
+            query={"note_id": note_id},
+            data=vip_content_item
+        )
+        utils.logger.info(f"[WeiboMongoStoreImplement.store_vip_content] Saved VIP content {note_id} to MongoDB")
 
 
 class WeiboExcelStoreImplement:

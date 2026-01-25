@@ -44,6 +44,7 @@ class CrawlerTypeEnum(str, Enum):
     SEARCH = "search"
     DETAIL = "detail"
     CREATOR = "creator"
+    CREATOR_VIP = "creator_vip"  # VIP exclusive content from creators (Weibo only)
 
 
 class SaveDataOptionEnum(str, Enum):
@@ -64,6 +65,7 @@ class CrawlerStartRequest(BaseModel):
     keywords: str = ""  # Keywords for search mode
     specified_ids: str = ""  # Post/video ID list for detail mode, comma-separated
     creator_ids: str = ""  # Creator ID list for creator mode, comma-separated
+    vip_creator_ids: str = ""  # VIP creator ID list for creator_vip mode (Weibo only), comma-separated
     start_page: int = 1
     enable_comments: bool = True
     enable_sub_comments: bool = False

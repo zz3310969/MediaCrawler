@@ -62,6 +62,7 @@ class CrawlerTypeEnum(str, Enum):
     SEARCH = "search"
     DETAIL = "detail"
     CREATOR = "creator"
+    CREATOR_VIP = "creator_vip"  # VIP exclusive content from creators (Weibo only)
 
 
 class SaveDataOptionEnum(str, Enum):
@@ -161,7 +162,7 @@ async def parse_cmd(argv: Optional[Sequence[str]] = None):
             CrawlerTypeEnum,
             typer.Option(
                 "--type",
-                help="Crawler type (search=Search | detail=Detail | creator=Creator)",
+                help="Crawler type (search=Search | detail=Detail | creator=Creator | creator_vip=VIP Content)",
                 rich_help_panel="Basic Configuration",
             ),
         ] = _coerce_enum(CrawlerTypeEnum, config.CRAWLER_TYPE, CrawlerTypeEnum.SEARCH),
@@ -250,6 +251,14 @@ async def parse_cmd(argv: Optional[Sequence[str]] = None):
                 rich_help_panel="Basic Configuration",
             ),
         ] = "",
+        vip_creator_id: Annotated[
+            str,
+            typer.Option(
+                "--vip_creator_id",
+                help="VIP Creator ID list in creator_vip mode (Weibo only), multiple IDs separated by commas",
+                rich_help_panel="Basic Configuration",
+            ),
+        ] = "",
         max_comments_count_singlenotes: Annotated[
             int,
             typer.Option(
@@ -266,9 +275,10 @@ async def parse_cmd(argv: Optional[Sequence[str]] = None):
         enable_headless = _to_bool(headless)
         init_db_value = init_db.value if init_db else None
 
-        # Parse specified_id and creator_id into lists
+        # Parse specified_id, creator_id and vip_creator_id into lists
         specified_id_list = [id.strip() for id in specified_id.split(",") if id.strip()] if specified_id else []
         creator_id_list = [id.strip() for id in creator_id.split(",") if id.strip()] if creator_id else []
+        vip_creator_id_list = [id.strip() for id in vip_creator_id.split(",") if id.strip()] if vip_creator_id else []
 
         # override global config
         config.PLATFORM = platform.value
@@ -309,6 +319,11 @@ async def parse_cmd(argv: Optional[Sequence[str]] = None):
             elif platform == PlatformEnum.KUAISHOU:
                 config.KS_CREATOR_ID_LIST = creator_id_list
 
+        # Set VIP creator ID list for creator_vip mode (Weibo only)
+        if vip_creator_id_list:
+            if platform == PlatformEnum.WEIBO:
+                config.WEIBO_VIP_CREATOR_ID_LIST = vip_creator_id_list
+
         return SimpleNamespace(
             platform=config.PLATFORM,
             lt=config.LOGIN_TYPE,
@@ -323,6 +338,7 @@ async def parse_cmd(argv: Optional[Sequence[str]] = None):
             cookies=config.COOKIES,
             specified_id=specified_id,
             creator_id=creator_id,
+            vip_creator_id=vip_creator_id,
         )
 
     command = typer.main.get_command(app)

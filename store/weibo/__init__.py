@@ -200,3 +200,109 @@ async def save_creator(user_id: str, user_info: Dict):
     }
     utils.logger.info(f"[store.weibo.save_creator] creator:{local_db_item}")
     await WeibostoreFactory.create_store().store_creator(local_db_item)
+
+
+async def batch_update_weibo_vip_contents(vip_content_list: List[Dict]):
+    """
+    Batch update weibo VIP contents
+    Args:
+        vip_content_list: List of VIP content items
+
+    Returns:
+
+    """
+    if not vip_content_list:
+        return
+    for vip_item in vip_content_list:
+        await update_weibo_vip_content(vip_item)
+
+
+async def update_weibo_vip_content(vip_item: Dict):
+    """
+    Update weibo VIP content
+    Args:
+        vip_item: VIP content item from API response
+
+    Returns:
+
+    """
+    if not vip_item:
+        return
+
+    # Extract data from VIP content item
+    mid = vip_item.get("mid", "")
+    oid = vip_item.get("oid", "")
+    title = vip_item.get("title", "")
+    url = vip_item.get("url", "")
+    scheme = vip_item.get("scheme", "")
+    page_view = vip_item.get("page_view", "")
+    poster = vip_item.get("poster", "")
+    content_type = vip_item.get("type", 0)
+    money = vip_item.get("money", "")
+    date = vip_item.get("date", "")
+
+    # Normalize URL
+    if url and url.startswith("//"):
+        url = "https:" + url
+
+    save_content_item = {
+        "note_id": mid,
+        "oid": oid,
+        "content": title,
+        "note_url": url,
+        "scheme": scheme,
+        "page_view": page_view,
+        "poster_url": poster,
+        "content_type": content_type,
+        "money": money,
+        "date": date,
+        "last_modify_ts": utils.get_current_timestamp(),
+        "source_keyword": source_keyword_var.get() if source_keyword_var.get() else "vip_content",
+    }
+
+    utils.logger.info(f"[store.weibo.update_weibo_vip_content] VIP content id:{mid}, title:{title[:24] if len(title) > 24 else title} ...")
+    await WeibostoreFactory.create_store().store_vip_content(vip_content_item=save_content_item)
+
+
+async def update_weibo_vip_poster_image(mid: str, pic_content: bytes, extension_file_name: str = "jpg") -> tuple:
+    """
+    Save weibo VIP content poster image to local and/or OSS
+    Args:
+        mid: Content mid as image identifier
+        pic_content: Image content bytes
+        extension_file_name: Image file extension
+
+    Returns:
+        Tuple of (local_path, oss_url)
+
+    """
+    return await WeiboVipPosterStoreImage().store_image({
+        "pic_id": f"vip_poster_{mid}",
+        "pic_content": pic_content,
+        "extension_file_name": extension_file_name
+    })
+
+
+async def update_weibo_vip_poster_paths(mid: str, local_path: str = "", oss_url: str = ""):
+    """
+    Update VIP content poster paths in database
+    Args:
+        mid: Content mid (note_id)
+        local_path: Local file path
+        oss_url: OSS/COS URL
+
+    Returns:
+
+    """
+    if not mid:
+        return
+
+    update_item = {
+        "note_id": mid,
+        "poster_local_path": local_path,
+        "poster_oss_url": oss_url,
+        "last_modify_ts": utils.get_current_timestamp(),
+    }
+
+    utils.logger.info(f"[store.weibo.update_weibo_vip_poster_paths] Updating poster paths for mid:{mid}, local:{local_path}, oss:{oss_url}")
+    await WeibostoreFactory.create_store().store_vip_content(vip_content_item=update_item)

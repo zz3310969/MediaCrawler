@@ -129,6 +129,9 @@ class WeiboCrawler(AbstractCrawler):
             elif config.CRAWLER_TYPE == "creator":
                 # Get creator's information and their notes and comments
                 await self.get_creators_and_notes()
+            elif config.CRAWLER_TYPE == "creator_vip":
+                # Get VIP exclusive content from creators
+                await self.get_creators_vip_content()
             else:
                 pass
             utils.logger.info("[WeiboCrawler.start] Weibo Crawler finished ...")
@@ -334,6 +337,315 @@ class WeiboCrawler(AbstractCrawler):
 
             else:
                 utils.logger.error(f"[WeiboCrawler.get_creators_and_notes] get creator info error, creator_id:{user_id}")
+
+    async def get_creators_vip_content(self) -> None:
+        """
+        Get VIP exclusive content from creators
+        This method uses page navigation with pagination to fetch all VIP content
+        Returns:
+
+        """
+        utils.logger.info("[WeiboCrawler.get_creators_vip_content] Begin get weibo VIP creators content")
+
+        for vuid in config.WEIBO_VIP_CREATOR_ID_LIST:
+            utils.logger.info(f"[WeiboCrawler.get_creators_vip_content] Processing VIP creator: {vuid}")
+
+            # Use page navigation with pagination to fetch all VIP content
+            all_vip_content = await self.fetch_vip_content_via_page_pagination(vuid)
+
+            utils.logger.info(f"[WeiboCrawler.get_creators_vip_content] Finished processing VIP creator {vuid}, total items: {len(all_vip_content)}")
+
+            # Sleep between creators
+            await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
+
+    async def fetch_vip_content_via_page_pagination(self, vuid: str) -> List[Dict]:
+        """
+        Fetch VIP content by first visiting the page to get cookies, then directly calling API with page parameter
+        This is more reliable than scrolling as we directly control the pagination
+        Args:
+            vuid: VIP creator user ID
+
+        Returns: List of all VIP content items
+
+        """
+        all_vip_content: List[Dict] = []
+        total_count: Optional[int] = None
+        first_page_data: List[Dict] = []
+
+        # Set up response interception to capture the first page data and cookies
+        async def handle_first_response(response):
+            nonlocal total_count, first_page_data
+            url = response.url
+            if "aj/vmember/contentlist" in url:
+                try:
+                    json_data = await response.json()
+                    if json_data.get("code") == 100000:
+                        data = json_data.get("data", {})
+                        total_count = data.get("total", 0)
+                        utils.logger.info(f"[WeiboCrawler.fetch_vip_content_via_page_pagination] Total VIP content count: {total_count}")
+
+                        content_list = data.get("list", [])
+                        if content_list:
+                            utils.logger.info(f"[WeiboCrawler.fetch_vip_content_via_page_pagination] Captured {len(content_list)} items from first page")
+                            first_page_data.extend(content_list)
+                    else:
+                        utils.logger.warning(f"[WeiboCrawler.fetch_vip_content_via_page_pagination] API returned error: {json_data}")
+                except Exception as e:
+                    utils.logger.error(f"[WeiboCrawler.fetch_vip_content_via_page_pagination] Error parsing response: {e}")
+
+        # Register response handler
+        self.context_page.on("response", handle_first_response)
+
+        try:
+            # Navigate to VIP content page to get cookies and first page data
+            vip_page_url = f"https://vipclub.e.weibo.com/vmember/contentlist?vuid={vuid}&tab_type={config.WEIBO_VIP_TAB_TYPE}&content_type={config.WEIBO_VIP_CONTENT_TYPE}"
+            utils.logger.info(f"[WeiboCrawler.fetch_vip_content_via_page_pagination] Navigating to VIP page: {vip_page_url}")
+
+            await self.context_page.goto(vip_page_url)
+            await asyncio.sleep(5)  # Wait for initial page load and first API request
+
+        finally:
+            # Remove response handler after first page
+            self.context_page.remove_listener("response", handle_first_response)
+
+        # Add first page data to results
+        all_vip_content.extend(first_page_data)
+        utils.logger.info(f"[WeiboCrawler.fetch_vip_content_via_page_pagination] First page collected: {len(all_vip_content)} items, max allowed: {config.CRAWLER_MAX_NOTES_COUNT}")
+
+        # If we got the first page, continue fetching remaining pages via direct API calls
+        if total_count and len(first_page_data) > 0:
+            page_size = 20
+            total_pages = (total_count + page_size - 1) // page_size  # Calculate total pages
+
+            utils.logger.info(f"[WeiboCrawler.fetch_vip_content_via_page_pagination] Total pages: {total_pages}, starting from page 2")
+
+            # Fetch remaining pages by directly calling the API with page parameter
+            for page in range(2, total_pages + 1):
+                # Check if we've collected enough items
+                if len(all_vip_content) >= config.CRAWLER_MAX_NOTES_COUNT:
+                    utils.logger.info(f"[WeiboCrawler.fetch_vip_content_via_page_pagination] Reached max notes count ({config.CRAWLER_MAX_NOTES_COUNT}), stopping")
+                    break
+
+                utils.logger.info(f"[WeiboCrawler.fetch_vip_content_via_page_pagination] Fetching page {page}/{total_pages}")
+
+                # Use JavaScript fetch to call the API with the browser's cookies
+                page_data = await self.context_page.evaluate(f"""
+                    async () => {{
+                        try {{
+                            const response = await fetch(
+                                'https://vipclub.e.weibo.com/aj/vmember/contentlist?tab_type={config.WEIBO_VIP_TAB_TYPE}&content_type={config.WEIBO_VIP_CONTENT_TYPE}&page={page}&page_size=20&vuid={vuid}',
+                                {{
+                                    method: 'GET',
+                                    credentials: 'include',
+                                    headers: {{
+                                        'Accept': 'application/json, text/plain, */*',
+                                        'Referer': 'https://vipclub.e.weibo.com/vmember/contentlist?vuid={vuid}&tab_type={config.WEIBO_VIP_TAB_TYPE}&content_type={config.WEIBO_VIP_CONTENT_TYPE}'
+                                    }}
+                                }}
+                            );
+                            const data = await response.json();
+                            return data;
+                        }} catch (e) {{
+                            return {{ error: e.message }};
+                        }}
+                    }}
+                """)
+
+                if page_data and page_data.get("code") == 100000:
+                    content_list = page_data.get("data", {}).get("list", [])
+                    if content_list:
+                        utils.logger.info(f"[WeiboCrawler.fetch_vip_content_via_page_pagination] Got {len(content_list)} items from page {page}")
+                        all_vip_content.extend(content_list)
+                    else:
+                        utils.logger.info(f"[WeiboCrawler.fetch_vip_content_via_page_pagination] No more content on page {page}, stopping")
+                        break
+                else:
+                    error_msg = page_data.get("error") or page_data.get("msg") if page_data else "Unknown error"
+                    utils.logger.warning(f"[WeiboCrawler.fetch_vip_content_via_page_pagination] Failed to fetch page {page}: {error_msg}")
+                    break
+
+                # Sleep between requests to avoid rate limiting
+                await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
+
+        utils.logger.info(f"[WeiboCrawler.fetch_vip_content_via_page_pagination] Data collection complete. Processing {len(all_vip_content)} items...")
+
+        # Save all content to storage
+        if all_vip_content:
+            await weibo_store.batch_update_weibo_vip_contents(all_vip_content)
+
+        # Download posters if enabled
+        enable_poster_download = getattr(config, 'ENABLE_VIP_POSTER_DOWNLOAD', False) or config.ENABLE_GET_MEIDAS
+        if enable_poster_download and all_vip_content:
+            utils.logger.info(f"[WeiboCrawler.fetch_vip_content_via_page_pagination] Starting poster download for {len(all_vip_content)} items...")
+            await self.batch_download_vip_posters(all_vip_content)
+
+        return all_vip_content
+
+    async def fetch_vip_content_via_page(self, vuid: str) -> List[Dict]:
+        """
+        Fetch VIP content by navigating to the page and intercepting API responses
+        Note: This method is kept for backward compatibility but fetch_vip_content_via_api is preferred
+        Args:
+            vuid: VIP creator user ID
+
+        Returns: List of all VIP content items
+
+        """
+        all_vip_content: List[Dict] = []
+        pending_content_batches: List[List[Dict]] = []  # Store batches for later processing
+        total_count: Optional[int] = None
+        last_content_count = 0
+        no_new_content_count = 0
+
+        # Set up response interception - only collect data, don't download yet
+        async def handle_response(response):
+            nonlocal all_vip_content, total_count, pending_content_batches
+            url = response.url
+            if "aj/vmember/contentlist" in url:
+                try:
+                    json_data = await response.json()
+                    if json_data.get("code") == 100000:
+                        data = json_data.get("data", {})
+                        if total_count is None:
+                            total_count = data.get("total", 0)
+                            utils.logger.info(f"[WeiboCrawler.fetch_vip_content_via_page] Total VIP content count: {total_count}")
+
+                        content_list = data.get("list", [])
+                        if content_list:
+                            utils.logger.info(f"[WeiboCrawler.fetch_vip_content_via_page] Captured {len(content_list)} items from API")
+                            all_vip_content.extend(content_list)
+                            pending_content_batches.append(content_list)
+                    else:
+                        utils.logger.warning(f"[WeiboCrawler.fetch_vip_content_via_page] API returned error: {json_data}")
+                except Exception as e:
+                    utils.logger.error(f"[WeiboCrawler.fetch_vip_content_via_page] Error parsing response: {e}")
+
+        # Register response handler
+        self.context_page.on("response", handle_response)
+
+        try:
+            # Navigate to VIP content page
+            vip_page_url = f"https://vipclub.e.weibo.com/vmember/contentlist?vuid={vuid}&tab_type={config.WEIBO_VIP_TAB_TYPE}&content_type={config.WEIBO_VIP_CONTENT_TYPE}"
+            utils.logger.info(f"[WeiboCrawler.fetch_vip_content_via_page] Navigating to VIP page: {vip_page_url}")
+
+            await self.context_page.goto(vip_page_url)
+            await asyncio.sleep(5)  # Wait for initial page load and API request
+
+            # Scroll down to trigger more content loading
+            # Use a reasonable max scroll count based on total or a large default
+            max_scroll_count = 100  # Maximum scrolls to prevent infinite loop
+            scroll_count = 0
+
+            while scroll_count < max_scroll_count:
+                # Check if we've collected enough items based on config limit
+                if len(all_vip_content) >= config.CRAWLER_MAX_NOTES_COUNT:
+                    utils.logger.info(f"[WeiboCrawler.fetch_vip_content_via_page] Reached max notes count ({config.CRAWLER_MAX_NOTES_COUNT}), stopping scroll")
+                    break
+
+                # Check if we've collected all available items
+                if total_count and len(all_vip_content) >= total_count:
+                    utils.logger.info(f"[WeiboCrawler.fetch_vip_content_via_page] Collected all {total_count} items, stopping scroll")
+                    break
+
+                # Check if no new content is being loaded (stuck detection)
+                if len(all_vip_content) == last_content_count:
+                    no_new_content_count += 1
+                    if no_new_content_count >= 3:
+                        utils.logger.info(f"[WeiboCrawler.fetch_vip_content_via_page] No new content after 3 scrolls, stopping")
+                        break
+                else:
+                    no_new_content_count = 0
+                    last_content_count = len(all_vip_content)
+
+                # Scroll to bottom to trigger more content loading using multiple methods
+                # Method 1: Standard scroll
+                await self.context_page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                await asyncio.sleep(0.5)
+
+                # Method 2: Scroll the main content container if exists
+                await self.context_page.evaluate("""
+                    () => {
+                        // Try to find and scroll the content container
+                        const containers = document.querySelectorAll('.content-list, .list-container, [class*="list"], [class*="content"]');
+                        containers.forEach(container => {
+                            if (container.scrollHeight > container.clientHeight) {
+                                container.scrollTop = container.scrollHeight;
+                            }
+                        });
+                        // Also trigger scroll event
+                        window.dispatchEvent(new Event('scroll'));
+                    }
+                """)
+
+                # Wait for content to load
+                await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC + 1)  # Add extra second for network latency
+
+                scroll_count += 1
+                utils.logger.info(f"[WeiboCrawler.fetch_vip_content_via_page] Scroll {scroll_count}, collected {len(all_vip_content)}/{total_count or '?'} items")
+
+        finally:
+            # Remove response handler
+            self.context_page.remove_listener("response", handle_response)
+
+        # After all data is collected, save to storage and download posters
+        utils.logger.info(f"[WeiboCrawler.fetch_vip_content_via_page] Data collection complete. Processing {len(all_vip_content)} items...")
+
+        # Save all content to storage
+        if all_vip_content:
+            await weibo_store.batch_update_weibo_vip_contents(all_vip_content)
+
+        # Download posters if enabled (after all data is collected)
+        enable_poster_download = getattr(config, 'ENABLE_VIP_POSTER_DOWNLOAD', False) or config.ENABLE_GET_MEIDAS
+        if enable_poster_download and all_vip_content:
+            utils.logger.info(f"[WeiboCrawler.fetch_vip_content_via_page] Starting poster download for {len(all_vip_content)} items...")
+            await self.batch_download_vip_posters(all_vip_content)
+
+        return all_vip_content
+
+    async def batch_download_vip_posters(self, vip_content_list: List[Dict]) -> None:
+        """
+        Batch download VIP content poster images and save to local/OSS
+        Args:
+            vip_content_list: List of VIP content items
+
+        Returns:
+
+        """
+        for vip_item in vip_content_list:
+            poster_url = vip_item.get("poster", "")
+            mid = vip_item.get("mid", "")
+
+            if not poster_url or not mid:
+                continue
+
+            try:
+                utils.logger.info(f"[WeiboCrawler.batch_download_vip_posters] Downloading poster for mid: {mid}")
+                pic_content = await self.wb_client.get_vip_poster_image(poster_url)
+
+                if pic_content:
+                    # Extract extension from URL
+                    extension = "jpg"
+                    if "." in poster_url:
+                        url_ext = poster_url.split("?")[0].split(".")[-1].lower()
+                        if url_ext in ["jpg", "jpeg", "png", "gif", "webp"]:
+                            extension = url_ext
+
+                    # Save poster and get paths
+                    local_path, oss_url = await weibo_store.update_weibo_vip_poster_image(mid, pic_content, extension)
+
+                    # Update VIP content with poster paths in database
+                    if local_path or oss_url:
+                        await weibo_store.update_weibo_vip_poster_paths(
+                            mid=mid,
+                            local_path=local_path or "",
+                            oss_url=oss_url or ""
+                        )
+
+                # Sleep after downloading each image
+                await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
+
+            except Exception as e:
+                utils.logger.error(f"[WeiboCrawler.batch_download_vip_posters] Failed to download poster for mid {mid}: {e}")
 
     async def create_weibo_client(self, httpx_proxy: Optional[str]) -> WeiboClient:
         """Create xhs client"""

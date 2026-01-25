@@ -251,6 +251,28 @@ class WeiboNoteComment(Base):
     sub_comment_count = Column(Text)
     parent_comment_id = Column(String(255))
 
+
+class WeiboVipNote(Base):
+    """微博VIP专属内容"""
+    __tablename__ = 'weibo_vip_note'
+    id = Column(Integer, primary_key=True)
+    add_ts = Column(BigInteger)
+    last_modify_ts = Column(BigInteger)
+    note_id = Column(String(255), index=True)  # mid from API
+    oid = Column(String(255), index=True)  # oid from API
+    vuid = Column(String(255), index=True)  # VIP creator user ID
+    content = Column(Text)  # title from API
+    note_url = Column(Text)  # url from API
+    scheme = Column(Text)  # scheme URL for app
+    page_view = Column(Text)  # view count
+    poster_url = Column(Text)  # poster image URL (original)
+    poster_local_path = Column(Text, default='')  # local saved poster path
+    poster_oss_url = Column(Text, default='')  # OSS/COS uploaded poster URL
+    content_type = Column(Integer, default=0)  # type from API (6 for VIP content)
+    money = Column(Text, default='')  # price if any
+    date = Column(Text, default='')  # date from API
+    source_keyword = Column(Text, default='')
+
 class WeiboCreator(Base):
     __tablename__ = 'weibo_creator'
     id = Column(Integer, primary_key=True)

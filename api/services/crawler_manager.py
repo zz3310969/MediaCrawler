@@ -218,6 +218,8 @@ class CrawlerManager:
             cmd.extend(["--specified_id", config.specified_ids])
         elif config.crawler_type.value == "creator" and config.creator_ids:
             cmd.extend(["--creator_id", config.creator_ids])
+        elif config.crawler_type.value == "creator_vip" and config.vip_creator_ids:
+            cmd.extend(["--vip_creator_id", config.vip_creator_ids])
 
         if config.start_page != 1:
             cmd.extend(["--start", str(config.start_page)])

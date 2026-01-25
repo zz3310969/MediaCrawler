@@ -157,6 +157,7 @@ async def get_config_options():
             {"value": "search", "label": "Search Mode"},
             {"value": "detail", "label": "Detail Mode"},
             {"value": "creator", "label": "Creator Mode"},
+            # {"value": "creator_vip", "label": "VIP Content Mode (Weibo)"},
         ],
         "save_options": [
             {"value": "json", "label": "JSON File"},

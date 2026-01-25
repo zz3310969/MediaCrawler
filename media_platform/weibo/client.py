@@ -410,3 +410,134 @@ class WeiboClient(ProxyRefreshMixin):
             crawler_total_count += 10
             notes_has_more = notes_res.get("cardlistInfo", {}).get("total", 0) > crawler_total_count
         return result
+
+    async def get_vip_content_list(
+        self,
+        vuid: str,
+        page: int = 1,
+        tab_type: int = 0,
+        content_type: int = 0,
+    ) -> Dict:
+        """
+        Get VIP exclusive content list from creator
+        Args:
+            vuid: VIP creator user ID
+            page: Page number for pagination
+            tab_type: Tab type (default 0)
+            content_type: Content type (0: 专属内容, 1: 专属直播, 2: 付费问答, 3: 付费文章)
+
+        Returns: VIP content list response
+
+        """
+        # VIP content API uses a different host
+        vip_host = "https://vipclub.e.weibo.com"
+        uri = "/aj/vmember/contentlist"
+        params = {
+            "vuid": vuid,
+            "tab_type": tab_type,
+            "content_type": content_type,
+            "page": page,
+        }
+
+        url = f"{vip_host}{uri}?{urlencode(params)}"
+        async with httpx.AsyncClient(proxy=self.proxy) as client:
+            response = await client.request("GET", url, timeout=self.timeout, headers=self.headers)
+            if response.status_code != 200:
+                raise DataFetchError(f"get vip content list err: {response.text}")
+
+            try:
+                data: Dict = response.json()
+            except json.decoder.JSONDecodeError:
+                utils.logger.error(f"[WeiboClient.get_vip_content_list] request {url} err, res:{response.text}")
+                raise DataFetchError(f"get vip content list json decode error")
+
+            if data.get("code") != 100000:
+                utils.logger.error(f"[WeiboClient.get_vip_content_list] request {url} err, res:{data}")
+                raise DataFetchError(data.get("msg", "get vip content list error"))
+
+            return data.get("data", {})
+
+    async def get_all_vip_content_by_creator_id(
+        self,
+        vuid: str,
+        tab_type: int = 0,
+        content_type: int = 0,
+        crawl_interval: float = 1.0,
+        callback: Optional[Callable] = None,
+        max_count: int = 500,
+    ) -> List[Dict]:
+        """
+        Get all VIP exclusive content from a creator
+        Args:
+            vuid: VIP creator user ID
+            tab_type: Tab type
+            content_type: Content type
+            crawl_interval: Interval between requests in seconds
+            callback: Optional callback function to process content items
+            max_count: Maximum number of items to fetch
+
+        Returns: List of all VIP content items
+
+        """
+        result = []
+        page = 1
+        total = None
+
+        while True:
+            utils.logger.info(f"[WeiboClient.get_all_vip_content_by_creator_id] Fetching page {page} for vuid: {vuid}")
+            vip_res = await self.get_vip_content_list(vuid, page, tab_type, content_type)
+
+            if total is None:
+                total = vip_res.get("total", 0)
+                utils.logger.info(f"[WeiboClient.get_all_vip_content_by_creator_id] Total VIP content count: {total}")
+
+            content_list = vip_res.get("list", [])
+            if not content_list:
+                utils.logger.info(f"[WeiboClient.get_all_vip_content_by_creator_id] No more content found")
+                break
+
+            utils.logger.info(f"[WeiboClient.get_all_vip_content_by_creator_id] Got {len(content_list)} items on page {page}")
+
+            if callback:
+                await callback(content_list)
+
+            result.extend(content_list)
+
+            # Check if we've reached the limit or fetched all content
+            if len(result) >= max_count or len(result) >= total:
+                utils.logger.info(f"[WeiboClient.get_all_vip_content_by_creator_id] Reached limit or total, stopping")
+                break
+
+            page += 1
+            await asyncio.sleep(crawl_interval)
+
+        return result
+
+    async def get_vip_poster_image(self, poster_url: str) -> Optional[bytes]:
+        """
+        Download VIP content poster image
+        Args:
+            poster_url: Poster image URL (may start with //)
+
+        Returns: Image content bytes or None if failed
+
+        """
+        if not poster_url:
+            return None
+
+        # Handle URL that starts with //
+        if poster_url.startswith("//"):
+            poster_url = "https:" + poster_url
+
+        async with httpx.AsyncClient(proxy=self.proxy) as client:
+            try:
+                response = await client.request("GET", poster_url, timeout=self.timeout, headers=self.headers)
+                response.raise_for_status()
+                if response.status_code == 200:
+                    return response.content
+                else:
+                    utils.logger.error(f"[WeiboClient.get_vip_poster_image] request {poster_url} err, status: {response.status_code}")
+                    return None
+            except httpx.HTTPError as exc:
+                utils.logger.error(f"[WeiboClient.get_vip_poster_image] {exc.__class__.__name__} for {poster_url} - {exc}")
+                return None
