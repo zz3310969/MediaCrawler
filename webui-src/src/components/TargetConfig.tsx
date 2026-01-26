@@ -56,14 +56,19 @@ export function TargetConfig({
   const [detailInputValue, setDetailInputValue] = useState('')
   const [creatorInputValue, setCreatorInputValue] = useState('')
 
-  // 获取关键词数组
-  const keywordList = keywords ? keywords.split(',').filter(k => k.trim()) : []
+  // 去重辅助函数
+  const deduplicateList = (list: string[]): string[] => {
+    return Array.from(new Set(list.filter(item => item.trim())))
+  }
+
+  // 获取关键词数组（自动去重）
+  const keywordList = deduplicateList(keywords ? keywords.split(',') : [])
   
-  // 获取帖子ID数组
-  const detailList = specifiedIds ? specifiedIds.split(',').filter(k => k.trim()) : []
+  // 获取帖子ID数组（自动去重）
+  const detailList = deduplicateList(specifiedIds ? specifiedIds.split(',') : [])
   
-  // 获取创作者ID数组
-  const creatorList = creatorIds ? creatorIds.split(',').filter(k => k.trim()) : []
+  // 获取创作者ID数组（自动去重）
+  const creatorList = deduplicateList(creatorIds ? creatorIds.split(',') : [])
 
   const platforms = platformsResponse?.data?.platforms || []
   const crawlerTypes = configResponse?.data?.crawler_types || []
@@ -72,10 +77,21 @@ export function TargetConfig({
   const handleKeywordKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && inputValue.trim()) {
       e.preventDefault()
-      const newKeyword = inputValue.trim()
+      
+      // 支持一次性粘贴多个关键词（用逗号、分号或换行分隔）
+      const newKeywords = inputValue
+        .split(/[,;，；\n]/)
+        .map(k => k.trim())
+        .filter(k => k && !keywordList.includes(k)) // 过滤空值和重复项
+      
+      if (newKeywords.length === 0) {
+        setInputValue('') // 清空输入框
+        return // 所有关键词都已存在或为空
+      }
+      
       const updatedKeywords = keywords 
-        ? `${keywords},${newKeyword}` 
-        : newKeyword
+        ? `${keywords},${newKeywords.join(',')}` 
+        : newKeywords.join(',')
       onKeywordsChange(updatedKeywords)
       setInputValue('') // 清空输入框
     }
@@ -93,10 +109,21 @@ export function TargetConfig({
   const handleDetailKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && detailInputValue.trim()) {
       e.preventDefault()
-      const newDetail = detailInputValue.trim()
+      
+      // 支持一次性粘贴多个帖子ID（用逗号、分号或换行分隔）
+      const newDetails = detailInputValue
+        .split(/[,;，；\n]/)
+        .map(d => d.trim())
+        .filter(d => d && !detailList.includes(d)) // 过滤空值和重复项
+      
+      if (newDetails.length === 0) {
+        setDetailInputValue('') // 清空输入框
+        return // 所有ID都已存在或为空
+      }
+      
       const updatedDetails = specifiedIds 
-        ? `${specifiedIds},${newDetail}` 
-        : newDetail
+        ? `${specifiedIds},${newDetails.join(',')}` 
+        : newDetails.join(',')
       onSpecifiedIdsChange(updatedDetails)
       setDetailInputValue('') // 清空输入框
     }
@@ -114,10 +141,21 @@ export function TargetConfig({
   const handleCreatorKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && creatorInputValue.trim()) {
       e.preventDefault()
-      const newCreator = creatorInputValue.trim()
+      
+      // 支持一次性粘贴多个创作者ID（用逗号、分号或换行分隔）
+      const newCreators = creatorInputValue
+        .split(/[,;，；\n]/)
+        .map(c => c.trim())
+        .filter(c => c && !creatorList.includes(c)) // 过滤空值和重复项
+      
+      if (newCreators.length === 0) {
+        setCreatorInputValue('') // 清空输入框
+        return // 所有ID都已存在或为空
+      }
+      
       const updatedCreators = creatorIds 
-        ? `${creatorIds},${newCreator}` 
-        : newCreator
+        ? `${creatorIds},${newCreators.join(',')}` 
+        : newCreators.join(',')
       onCreatorIdsChange(updatedCreators)
       setCreatorInputValue('') // 清空输入框
     }
@@ -129,6 +167,28 @@ export function TargetConfig({
       .filter((_, i) => i !== index)
       .join(',')
     onCreatorIdsChange(newCreators)
+  }
+
+  // 处理帖子ID失去焦点时去重
+  const handleDetailBlur = () => {
+    if (specifiedIds) {
+      const deduplicated = deduplicateList(specifiedIds.split(','))
+      const deduplicatedStr = deduplicated.join(',')
+      if (deduplicatedStr !== specifiedIds) {
+        onSpecifiedIdsChange(deduplicatedStr)
+      }
+    }
+  }
+
+  // 处理创作者ID失去焦点时去重
+  const handleCreatorBlur = () => {
+    if (creatorIds) {
+      const deduplicated = deduplicateList(creatorIds.split(','))
+      const deduplicatedStr = deduplicated.join(',')
+      if (deduplicatedStr !== creatorIds) {
+        onCreatorIdsChange(deduplicatedStr)
+      }
+    }
   }
 
   return (
@@ -198,7 +258,7 @@ export function TargetConfig({
           <div className="space-y-1">
             <Label className="text-xs">关键词</Label>
             <p className="text-xs text-muted-foreground mb-1">
-              输入关键词按回车添加，多个用逗号分隔
+              输入关键词按回车添加，支持批量粘贴（逗号/分号/换行分隔），自动去重
             </p>
             <Input
               placeholder="输入关键词，按回车添加..."
@@ -235,13 +295,14 @@ export function TargetConfig({
           <div className="space-y-1">
             <Label className="text-xs">帖子ID</Label>
             <p className="text-xs text-muted-foreground mb-1">
-              输入帖子ID，按回车添加
+              输入帖子ID按回车添加，支持批量粘贴（逗号/分号/换行分隔），自动去重
             </p>
             <textarea
               placeholder={"示例:\n123456789\n987654321"}
               value={detailInputValue}
               onChange={(e) => setDetailInputValue(e.target.value)}
               onKeyDown={handleDetailKeyDown}
+              onBlur={handleDetailBlur}
               disabled={disabled}
               className="w-full h-16 px-3 py-2 text-sm rounded-md border border-input bg-background font-mono resize-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring placeholder:text-xs placeholder:text-muted-foreground"
             />
@@ -272,13 +333,14 @@ export function TargetConfig({
           <div className="space-y-1">
             <Label className="text-xs">创作者 ID</Label>
             <p className="text-xs text-muted-foreground mb-1">
-              输入创作者的ID/URL，按回车添加
+              输入创作者ID/URL按回车添加，支持批量粘贴（逗号/分号/换行分隔），自动去重
             </p>
             <textarea
               placeholder={"示例:\n5533390220\nhttps://weibo.com/u/5533390220"}
               value={creatorInputValue}
               onChange={(e) => setCreatorInputValue(e.target.value)}
               onKeyDown={handleCreatorKeyDown}
+              onBlur={handleCreatorBlur}
               disabled={disabled}
               className="w-full h-16 px-3 py-2 text-sm rounded-md border border-input bg-background font-mono resize-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring placeholder:text-xs placeholder:text-muted-foreground"
             />
