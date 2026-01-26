@@ -1,7 +1,7 @@
 // 终端风格日志查看器
 import { useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { FileText, Trash2, Maximize2, Database } from 'lucide-react'
+import { FileText, Trash2, Database } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { useWebSocket } from '@/hooks/useWebSocket'
@@ -65,14 +65,15 @@ export function TerminalLog() {
       return { text: 'OFFLINE', variant: 'secondary' as const }
     }
     
-    const statusMap = {
+    const statusMap: Record<string, { text: string; variant: 'secondary' | 'default' | 'destructive' }> = {
       'idle': { text: 'IDLE', variant: 'secondary' as const },
       'running': { text: 'RUNNING', variant: 'default' as const },
       'stopping': { text: 'STOPPING', variant: 'secondary' as const },
       'error': { text: 'ERROR', variant: 'destructive' as const },
     }
     
-    return statusMap[status?.status || 'idle'] || statusMap.idle
+    const statusKey = status?.data?.status || 'idle'
+    return statusMap[statusKey] || statusMap.idle
   }
 
   // 自动滚动到底部

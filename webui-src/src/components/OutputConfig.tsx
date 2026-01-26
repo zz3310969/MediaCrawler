@@ -35,7 +35,7 @@ export function OutputConfig({
     queryFn: crawlerApi.getConfigOptions,
   })
 
-  const saveOptions = configOptions?.save_options || []
+  const saveOptions = configOptions?.data?.save_options || []
 
   return (
     <Card className="h-full">
@@ -60,7 +60,7 @@ export function OutputConfig({
             onChange={(e) => onSaveOptionChange(e.target.value as SaveOption)}
             disabled={disabled || saveOptions.length === 0}
           >
-            {saveOptions.map((option) => (
+            {saveOptions.map((option: { value: string; label: string }) => (
               <option key={option.value} value={option.value}>
                 {option.label}
               </option>

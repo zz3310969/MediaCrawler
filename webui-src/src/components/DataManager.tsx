@@ -5,7 +5,8 @@ import { FileText, RefreshCw, Download } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { crawlerApi, type DataFile } from '@/api/crawler'
+import { crawlerApi } from '@/api/crawler'
+import type { DataFile } from '@/api/crawler'
 import { formatFileSize, formatDate, extractCategory } from '@/lib/formatters'
 
 interface DataManagerProps {
@@ -23,11 +24,11 @@ export function DataManager({ open, onOpenChange }: DataManagerProps) {
     enabled: open,
   })
 
-  const files = filesData?.files || []
+  const files = filesData?.data?.files || []
 
   // 统计各类别的文件数量
   const categoryCounts: Record<string, number> = {}
-  files.forEach(file => {
+  files.forEach((file: DataFile) => {
     const category = extractCategory(file.path)
     categoryCounts[category] = (categoryCounts[category] || 0) + 1
   })
@@ -45,7 +46,7 @@ export function DataManager({ open, onOpenChange }: DataManagerProps) {
   // 筛选文件
   const filteredFiles = selectedCategory === 'all' 
     ? files 
-    : files.filter(file => extractCategory(file.path) === selectedCategory)
+    : files.filter((file: DataFile) => extractCategory(file.path) === selectedCategory)
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -102,7 +103,7 @@ export function DataManager({ open, onOpenChange }: DataManagerProps) {
                 暂无数据文件
               </div>
             ) : (
-              filteredFiles.map((file) => (
+              filteredFiles.map((file: DataFile) => (
                 <div
                   key={file.path}
                   className="bg-card border border-border rounded-lg p-4 hover:shadow-lg transition-shadow cursor-pointer group"

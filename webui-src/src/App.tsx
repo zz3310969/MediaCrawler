@@ -57,8 +57,7 @@ function MainApp() {
     },
   })
 
-  const isRunning = status?.status === 'running'
-  const isIdle = status?.status === 'idle'
+  const isRunning = status?.data?.status === 'running'
 
   const handleStartStop = () => {
     if (isRunning) {
@@ -110,10 +109,10 @@ function MainApp() {
           <TargetConfig
             platform={config.platform}
             crawlerType={config.crawler_type}
-            keywords={config.keywords}
-            specifiedIds={config.specified_ids}
-            creatorIds={config.creator_ids}
-            startPage={config.start_page}
+            keywords={config.keywords || ''}
+            specifiedIds={config.specified_ids || ''}
+            creatorIds={config.creator_ids || ''}
+            startPage={config.start_page || 1}
             disabled={isRunning}
             onPlatformChange={(value) => updateConfig({ platform: value })}
             onCrawlerTypeChange={handleCrawlerTypeChange}
@@ -134,10 +133,10 @@ function MainApp() {
 
           {/* 输出配置 */}
           <OutputConfig
-            saveOption={config.save_option}
-            enableComments={config.enable_comments}
-            enableSubComments={config.enable_sub_comments}
-            headless={config.headless}
+            saveOption={config.save_option || 'json'}
+            enableComments={config.enable_comments || false}
+            enableSubComments={config.enable_sub_comments || false}
+            headless={config.headless || false}
             disabled={isRunning}
             onSaveOptionChange={(value) => updateConfig({ save_option: value })}
             onEnableCommentsChange={(value) => updateConfig({ enable_comments: value })}

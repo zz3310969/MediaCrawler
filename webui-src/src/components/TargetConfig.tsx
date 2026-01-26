@@ -65,8 +65,8 @@ export function TargetConfig({
   // 获取创作者ID数组
   const creatorList = creatorIds ? creatorIds.split(',').filter(k => k.trim()) : []
 
-  const platforms = platformsData?.platforms || []
-  const crawlerTypes = configOptions?.crawler_types || []
+  const platforms = platformsData?.data?.platforms || []
+  const crawlerTypes = configOptions?.data?.crawler_types || []
 
   // 处理回车键添加关键词
   const handleKeywordKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
@@ -154,7 +154,7 @@ export function TargetConfig({
             onChange={(e) => onPlatformChange(e.target.value as Platform)}
             disabled={disabled || platforms.length === 0}
           >
-            {platforms.map((p) => (
+            {platforms.map((p: { value: string; label: string; icon: string }) => (
               <option key={p.value} value={p.value}>
                 {p.label}
               </option>
@@ -172,7 +172,7 @@ export function TargetConfig({
               onChange={(e) => onCrawlerTypeChange(e.target.value as CrawlerType)}
               disabled={disabled || crawlerTypes.length === 0}
             >
-              {crawlerTypes.map((t) => (
+              {crawlerTypes.map((t: { value: string; label: string }) => (
                 <option key={t.value} value={t.value}>
                   {t.label}
                 </option>

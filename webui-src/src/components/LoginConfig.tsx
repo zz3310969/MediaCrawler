@@ -27,7 +27,7 @@ export function LoginConfig({
     queryFn: crawlerApi.getConfigOptions,
   })
 
-  const loginTypes = configOptions?.login_types || []
+  const loginTypes = configOptions?.data?.login_types || []
 
   return (
     <Card className="h-full">
@@ -52,7 +52,7 @@ export function LoginConfig({
             onChange={(e) => onLoginTypeChange(e.target.value as LoginType)}
             disabled={disabled || loginTypes.length === 0}
           >
-            {loginTypes.map((t) => (
+            {loginTypes.map((t: { value: string; label: string }) => (
               <option key={t.value} value={t.value}>
                 {t.label}
               </option>
