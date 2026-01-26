@@ -18,7 +18,7 @@ from database.db_session import get_session
 from database.models import (
     IncrementalMetadata, 
     XhsNote, XhsNoteComment,
-    WeiboNote, WeiboNoteComment,
+    WeiboNote, WeiboNoteComment, WeiboVipNote,
     DouyinAweme, DouyinAwemeComment,
     BilibiliVideo, BilibiliVideoComment,
     KuaishouVideo, KuaishouVideoComment,
@@ -31,6 +31,7 @@ from tools.time_util import get_current_timestamp
 PLATFORM_MODEL_MAP = {
     'xhs': {'note': XhsNote, 'note_id_field': 'note_id', 'user_id_field': 'user_id', 'time_field': 'time', 'title_field': 'title'},
     'weibo': {'note': WeiboNote, 'note_id_field': 'note_id', 'user_id_field': 'user_id', 'time_field': 'create_time', 'title_field': 'content'},
+    'weibo_vip': {'note': WeiboVipNote, 'note_id_field': 'note_id', 'user_id_field': 'vuid', 'time_field': 'add_ts', 'title_field': 'content'},  # 使用 add_ts（首次入库时间）
     'dy': {'note': DouyinAweme, 'note_id_field': 'aweme_id', 'user_id_field': 'user_id', 'time_field': 'create_time', 'title_field': 'title'},
     'bili': {'note': BilibiliVideo, 'note_id_field': 'video_id', 'user_id_field': 'user_id', 'time_field': 'create_time', 'title_field': 'title'},
     'ks': {'note': KuaishouVideo, 'note_id_field': 'video_id', 'user_id_field': 'user_id', 'time_field': 'create_time', 'title_field': 'title'},

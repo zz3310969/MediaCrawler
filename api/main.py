@@ -23,19 +23,68 @@ Or: python -m api.main
 """
 import asyncio
 import os
+import sys
 import subprocess
 import uvicorn
+from pathlib import Path
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
+# Add project root to sys.path
+project_root = Path(__file__).resolve().parents[1]
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
 from .routers import crawler_router, data_router, websocket_router
+import config
+from database import db
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """API 服务生命周期管理"""
+    # 启动时执行
+    print("[API] MediaCrawler WebUI API 正在启动...")
+    
+    # 解析命令行参数（如果有的话）
+    # 这样可以支持 --save_data_option 等参数
+    if len(sys.argv) > 1 and not any(arg.startswith('api.main') or arg == '-m' for arg in sys.argv[:3]):
+        try:
+            import cmd_arg
+            await cmd_arg.parse_cmd()
+            print(f"[API] 已应用命令行参数")
+        except SystemExit:
+            # parse_cmd 可能会触发 help 等退出，忽略
+            pass
+        except Exception as e:
+            print(f"[API] 解析命令行参数失败（将使用配置文件）: {e}")
+    
+    # 如果使用数据库模式，验证数据库连接
+    if config.SAVE_DATA_OPTION in ("db", "sqlite", "mysql", "postgres"):
+        print(f"[API] 正在验证数据库连接...")
+        if not await db.verify_connection():
+            print(f"[API] ⚠️  数据库连接失败，请检查数据库配置和连接状态")
+            print(f"[API] 当前数据库类型: {config.SAVE_DATA_OPTION}")
+            print(f"[API] API 服务将继续启动，但数据存储功能可能不可用")
+        else:
+            print(f"[API] ✓ 数据库连接验证成功")
+    
+    print(f"[API] ✓ API 服务启动完成")
+    
+    yield
+    
+    # 关闭时执行
+    print("[API] API 服务正在关闭...")
+
 
 app = FastAPI(
     title="MediaCrawler WebUI API",
     description="API for controlling MediaCrawler from WebUI",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 
 # Get webui static files directory
@@ -78,6 +127,48 @@ async def serve_frontend():
 @app.get("/api/health")
 async def health_check():
     return {"status": "ok"}
+
+
+@app.get("/api/db/check")
+async def check_database():
+    """检查数据库连接状态"""
+    try:
+        db_type = config.SAVE_DATA_OPTION
+        
+        # 如果不是数据库模式
+        if db_type in ["json", "csv", "excel"]:
+            return {
+                "success": True,
+                "db_type": db_type,
+                "message": f"当前使用文件存储模式 ({db_type})，无需数据库连接",
+                "need_db": False
+            }
+        
+        # 验证数据库连接
+        is_connected = await db.verify_connection(db_type)
+        
+        if is_connected:
+            return {
+                "success": True,
+                "db_type": db_type,
+                "message": f"{db_type} 数据库连接正常",
+                "need_db": True
+            }
+        else:
+            return {
+                "success": False,
+                "db_type": db_type,
+                "message": f"{db_type} 数据库连接失败，请检查配置",
+                "need_db": True
+            }
+    except Exception as e:
+        return {
+            "success": False,
+            "db_type": config.SAVE_DATA_OPTION,
+            "message": f"数据库连接检查失败: {str(e)}",
+            "error": str(e),
+            "need_db": True
+        }
 
 
 @app.get("/api/env/check")
@@ -167,6 +258,14 @@ async def get_config_options():
             {"value": "db", "label": "MySQL Database"},
             {"value": "mongodb", "label": "MongoDB Database"},
         ],
+        "incremental_config": {
+            "description": "Incremental crawling (only fetch new content, 10-100x faster)",
+            "supports_platforms": ["xhs", "wb", "dy", "bili"],  # 支持的平台
+            "supports_crawler_types": ["creator", "creator_vip"],  # 支持的爬取类型
+            "default_enabled": False,
+            "default_threshold": 3,
+            "threshold_range": {"min": 1, "max": 10},
+        },
     }
 
 

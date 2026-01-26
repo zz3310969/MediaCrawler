@@ -72,6 +72,9 @@ class CrawlerStartRequest(BaseModel):
     save_option: SaveDataOptionEnum = SaveDataOptionEnum.JSON
     cookies: str = ""
     headless: bool = False
+    # 增量爬取配置
+    enable_incremental: bool = False  # 是否启用增量爬取（只爬取新内容）
+    incremental_early_stop: int = 3  # 早停阈值（连续N条已存在内容就停止）
 
 
 class CrawlerStatusResponse(BaseModel):

@@ -46,6 +46,68 @@ async def init_table_schema(db_type: str):
 async def init_db(db_type: str = None):
     await init_table_schema(db_type)
 
+def _get_db_connection_info(db_type: str) -> str:
+    """
+    获取数据库连接信息字符串（隐藏密码）
+    Args:
+        db_type: 数据库类型
+    Returns:
+        str: 格式化的连接信息
+    """
+    from config.db_config import mysql_db_config, sqlite_db_config, postgres_db_config
+    
+    if db_type == "sqlite":
+        return f"sqlite://{sqlite_db_config['db_path']}"
+    elif db_type in ["mysql", "db"]:
+        return f"mysql://{mysql_db_config['user']}:****@{mysql_db_config['host']}:{mysql_db_config['port']}/{mysql_db_config['db_name']}"
+    elif db_type == "postgres":
+        return f"postgresql://{postgres_db_config['user']}:****@{postgres_db_config['host']}:{postgres_db_config['port']}/{postgres_db_config['db_name']}"
+    else:
+        return f"{db_type}://unknown"
+
+
+async def verify_connection(db_type: str = None) -> bool:
+    """
+    验证数据库连接是否正常
+    Args:
+        db_type: 数据库类型，如果为 None 则使用配置中的类型
+    Returns:
+        bool: 连接成功返回 True，否则返回 False
+    """
+    if db_type is None:
+        import config
+        db_type = config.SAVE_DATA_OPTION
+    
+    # 如果不是数据库模式，直接返回 True
+    if db_type in ["json", "csv", "excel"]:
+        return True
+    
+    try:
+        from database.db_session import get_async_engine
+        from sqlalchemy import text
+        
+        # 获取并打印连接信息
+        conn_info = _get_db_connection_info(db_type)
+        utils.logger.info(f"[verify_connection] 正在验证 {db_type} 数据库连接...")
+        utils.logger.info(f"[verify_connection] 连接地址: {conn_info}")
+        
+        engine = get_async_engine(db_type)
+        if not engine:
+            utils.logger.error(f"[verify_connection] 无法获取 {db_type} 数据库引擎")
+            return False
+        
+        # 尝试执行简单查询来验证连接
+        async with engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
+        
+        utils.logger.info(f"[verify_connection] {db_type} 数据库连接验证成功 ✓")
+        return True
+        
+    except Exception as e:
+        utils.logger.error(f"[verify_connection] {db_type} 数据库连接验证失败: {e}")
+        utils.logger.error(f"[verify_connection] 连接地址: {conn_info}")
+        return False
+
 async def close():
     """
     Placeholder for closing database connections if needed in the future.

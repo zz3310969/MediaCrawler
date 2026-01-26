@@ -106,6 +106,15 @@ async def main() -> None:
         print(f"Database {args.init_db} initialized successfully.")
         return
 
+    # 如果使用数据库模式，先验证数据库连接
+    if config.SAVE_DATA_OPTION in ("db", "sqlite", "mysql", "postgres"):
+        print(f"[Main] 正在验证数据库连接...")
+        if not await db.verify_connection():
+            print(f"[Main] ❌ 数据库连接失败，请检查数据库配置和连接状态")
+            print(f"[Main] 当前数据库类型: {config.SAVE_DATA_OPTION}")
+            return
+        print(f"[Main] ✓ 数据库连接验证成功")
+
     crawler = CrawlerFactory.create_crawler(platform=config.PLATFORM)
     await crawler.start()
 

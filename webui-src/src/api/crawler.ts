@@ -21,6 +21,9 @@ export interface CrawlerStartRequest {
   save_option?: SaveOption
   cookies?: string
   headless?: boolean
+  // 增量爬取配置
+  enable_incremental?: boolean  // 是否启用增量爬取
+  incremental_early_stop?: number  // 早停阈值
 }
 
 export interface CrawlerStatus {
@@ -50,10 +53,23 @@ export interface ConfigOption {
   label: string
 }
 
+export interface IncrementalConfig {
+  description: string
+  supports_platforms: Platform[]
+  supports_crawler_types: CrawlerType[]
+  default_enabled: boolean
+  default_threshold: number
+  threshold_range: {
+    min: number
+    max: number
+  }
+}
+
 export interface ConfigOptions {
   login_types: ConfigOption[]
   crawler_types: ConfigOption[]
   save_options: ConfigOption[]
+  incremental_config?: IncrementalConfig
 }
 
 // 数据文件类型

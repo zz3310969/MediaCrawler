@@ -609,6 +609,8 @@ class WeiboCrawler(AbstractCrawler):
         """
         Fetch VIP content by first visiting the page to get cookies, then directly calling API with page parameter
         This is more reliable than scrolling as we directly control the pagination
+        支持增量爬取 - 使用早停策略
+        
         Args:
             vuid: VIP creator user ID
             progress: 进度对象（可选）
@@ -619,6 +621,33 @@ class WeiboCrawler(AbstractCrawler):
         all_vip_content: List[Dict] = []
         total_count: Optional[int] = None
         first_page_data: List[Dict] = []
+        
+        # 🔥 初始化增量处理器
+        incremental_handler = None
+        if config.ENABLE_INCREMENTAL_CRAWL:
+            from crawler.incremental import CreatorIncrementalHandler
+            incremental_handler = CreatorIncrementalHandler(
+                platform="weibo_vip",
+                store_type=config.SAVE_DATA_OPTION
+            )
+            utils.logger.info(
+                f"[WeiboCrawler.fetch_vip_content_via_page_pagination] "
+                f"增量爬取已启用 - VIP模式 (阈值: {config.CREATOR_EARLY_STOP_THRESHOLD})"
+            )
+            
+            # 查询历史最新内容
+            last_content = await incremental_handler.get_last_crawled_note(vuid)
+            if last_content:
+                utils.logger.info(
+                    f"[WeiboCrawler.fetch_vip_content_via_page_pagination] "
+                    f"VIP创作者 {vuid} 上次最新内容: {last_content['note_id']} "
+                    f"标题: {last_content['title'][:30] if last_content['title'] else 'N/A'}..."
+                )
+            else:
+                utils.logger.info(
+                    f"[WeiboCrawler.fetch_vip_content_via_page_pagination] "
+                    f"VIP创作者 {vuid} 首次爬取，将处理所有内容"
+                )
 
         # Set up response interception to capture the first page data and cookies
         async def handle_first_response(response):
@@ -656,9 +685,43 @@ class WeiboCrawler(AbstractCrawler):
             # Remove response handler after first page
             self.context_page.remove_listener("response", handle_first_response)
 
-        # Add first page data to results
-        all_vip_content.extend(first_page_data)
-        utils.logger.info(f"[WeiboCrawler.fetch_vip_content_via_page_pagination] First page collected: {len(all_vip_content)} items, max allowed: {config.CRAWLER_MAX_NOTES_COUNT}")
+        # 🔥 处理第一页数据（增量过滤）
+        if incremental_handler and first_page_data:
+            stop_count = 0
+            early_stop_threshold = config.CREATOR_EARLY_STOP_THRESHOLD
+            
+            for item in first_page_data:
+                mid = item.get("mid")
+                if await incremental_handler.should_stop_crawling(mid, vuid):
+                    stop_count += 1
+                    utils.logger.debug(
+                        f"[VIP增量] 内容 {mid} 已存在, stop_count: {stop_count}/{early_stop_threshold}"
+                    )
+                    
+                    # 第一页就全部已存在，直接返回
+                    if stop_count >= early_stop_threshold:
+                        utils.logger.info(
+                            f"[VIP增量] 🛑 第一页已有 {stop_count} 条内容存在，无需继续爬取"
+                        )
+                        # 更新元数据后返回
+                        if all_vip_content:
+                            await self._save_vip_data_and_update_metadata(
+                                all_vip_content, vuid, incremental_handler
+                            )
+                        return all_vip_content
+                else:
+                    stop_count = 0
+                    all_vip_content.append(item)
+        else:
+            # 不使用增量，直接添加
+            all_vip_content.extend(first_page_data)
+        
+        utils.logger.info(
+            f"[WeiboCrawler.fetch_vip_content_via_page_pagination] "
+            f"First page processed: 新增={len(all_vip_content)}, "
+            f"已跳过={len(first_page_data) - len(all_vip_content)}, "
+            f"max allowed: {config.CRAWLER_MAX_NOTES_COUNT}"
+        )
 
         # If we got the first page, continue fetching remaining pages via direct API calls
         if total_count and len(first_page_data) > 0:
@@ -667,6 +730,10 @@ class WeiboCrawler(AbstractCrawler):
 
             utils.logger.info(f"[WeiboCrawler.fetch_vip_content_via_page_pagination] Total pages: {total_pages}, starting from page 2")
 
+            # 🔥 初始化早停计数器
+            stop_count = 0
+            early_stop_threshold = config.CREATOR_EARLY_STOP_THRESHOLD
+            
             # Fetch remaining pages by directly calling the API with page parameter
             for page in range(2, total_pages + 1):
                 # Check if we've collected enough items
@@ -703,7 +770,46 @@ class WeiboCrawler(AbstractCrawler):
                     content_list = page_data.get("data", {}).get("list", [])
                     if content_list:
                         utils.logger.info(f"[WeiboCrawler.fetch_vip_content_via_page_pagination] Got {len(content_list)} items from page {page}")
-                        all_vip_content.extend(content_list)
+                        
+                        # 🔥 增量处理：逐个检查，支持早停
+                        if incremental_handler:
+                            new_items = []
+                            for item in content_list:
+                                mid = item.get("mid")
+                                
+                                # 检查是否已存在
+                                if await incremental_handler.should_stop_crawling(mid, vuid):
+                                    stop_count += 1
+                                    utils.logger.debug(
+                                        f"[VIP增量] 内容 {mid} 已存在, stop_count: {stop_count}/{early_stop_threshold}"
+                                    )
+                                    
+                                    # 连续N条已存在，停止爬取
+                                    if stop_count >= early_stop_threshold:
+                                        utils.logger.info(
+                                            f"[VIP增量] 🛑 停止爬取VIP创作者 {vuid} "
+                                            f"(连续 {early_stop_threshold} 条内容已存在，"
+                                            f"第{page}页剩余 {len(content_list) - len(new_items)} 条已跳过，"
+                                            f"总剩余约 {(total_pages - page) * 20} 条)"
+                                        )
+                                        all_vip_content.extend(new_items)
+                                        # 提前退出循环
+                                        break
+                                else:
+                                    stop_count = 0  # 发现新内容，重置计数
+                                    new_items.append(item)
+                            
+                            # 如果触发了早停，跳出分页循环
+                            if stop_count >= early_stop_threshold:
+                                break
+                            
+                            all_vip_content.extend(new_items)
+                            utils.logger.info(
+                                f"[VIP增量] 第{page}页: 新增={len(new_items)}, 已跳过={len(content_list)-len(new_items)}"
+                            )
+                        else:
+                            # 不使用增量，全部添加
+                            all_vip_content.extend(content_list)
                     else:
                         utils.logger.info(f"[WeiboCrawler.fetch_vip_content_via_page_pagination] No more content on page {page}, stopping")
                         break
@@ -717,17 +823,52 @@ class WeiboCrawler(AbstractCrawler):
 
         utils.logger.info(f"[WeiboCrawler.fetch_vip_content_via_page_pagination] Data collection complete. Processing {len(all_vip_content)} items...")
 
+        # 🔥 保存数据并更新增量元数据
+        await self._save_vip_data_and_update_metadata(all_vip_content, vuid, incremental_handler)
+
+        return all_vip_content
+
+    async def _save_vip_data_and_update_metadata(
+        self, 
+        all_vip_content: List[Dict], 
+        vuid: str, 
+        incremental_handler
+    ) -> None:
+        """
+        保存VIP数据并更新增量元数据
+        
+        Args:
+            all_vip_content: VIP内容列表
+            vuid: VIP创作者ID
+            incremental_handler: 增量处理器（可能为None）
+        """
         # Save all content to storage
         if all_vip_content:
-            await weibo_store.batch_update_weibo_vip_contents(all_vip_content)
+            await weibo_store.batch_update_weibo_vip_contents(all_vip_content, vuid=vuid)
 
         # Download posters if enabled
         enable_poster_download = getattr(config, 'ENABLE_VIP_POSTER_DOWNLOAD', False) or config.ENABLE_GET_MEIDAS
         if enable_poster_download and all_vip_content:
-            utils.logger.info(f"[WeiboCrawler.fetch_vip_content_via_page_pagination] Starting poster download for {len(all_vip_content)} items...")
+            utils.logger.info(f"[WeiboCrawler._save_vip_data_and_update_metadata] Starting poster download for {len(all_vip_content)} items...")
             await self.batch_download_vip_posters(all_vip_content)
-
-        return all_vip_content
+        
+        # 🔥 更新增量元数据
+        if incremental_handler and all_vip_content:
+            latest_item = all_vip_content[0]  # 第一条是最新的
+            await incremental_handler.update_metadata(
+                creator_id=vuid,
+                latest_note={
+                    'note_id': latest_item.get('mid', ''),
+                    'time': utils.get_current_timestamp(),  # VIP内容使用当前时间戳
+                    'title': latest_item.get('title', '')[:50]
+                },
+                total_new_crawled=len(all_vip_content),
+                creator_name=vuid
+            )
+            utils.logger.info(
+                f"[VIP增量] 创作者 {vuid} 统计: "
+                f"本次新增={len(all_vip_content)}"
+            )
 
     async def fetch_vip_content_via_page(self, vuid: str) -> List[Dict]:
         """
@@ -840,7 +981,7 @@ class WeiboCrawler(AbstractCrawler):
 
         # Save all content to storage
         if all_vip_content:
-            await weibo_store.batch_update_weibo_vip_contents(all_vip_content)
+            await weibo_store.batch_update_weibo_vip_contents(all_vip_content, vuid=vuid)
 
         # Download posters if enabled (after all data is collected)
         enable_poster_download = getattr(config, 'ENABLE_VIP_POSTER_DOWNLOAD', False) or config.ENABLE_GET_MEIDAS

@@ -1,0 +1,26 @@
+{
+  "platform": "wb",
+  "crawler_type": "creator_vip",
+  "task_id": "wb_creator_vip_20260126_190701_3e4d7319",
+  "started_at": "2026-01-26T19:07:01.524697",
+  "updated_at": "2026-01-26T19:07:08.860454",
+  "status": "completed",
+  "keywords": [],
+  "current_keyword_index": 0,
+  "current_page": 1,
+  "creator_ids": [],
+  "current_creator_index": 0,
+  "vip_creator_ids": [
+    "7948230240"
+  ],
+  "current_vip_creator_index": 0,
+  "note_ids": [],
+  "current_note_index": 0,
+  "processed_note_ids": [],
+  "processed_comment_note_ids": [],
+  "total_notes_crawled": 0,
+  "total_comments_crawled": 0,
+  "total_creators_crawled": 0,
+  "last_error": "",
+  "error_count": 0
+}

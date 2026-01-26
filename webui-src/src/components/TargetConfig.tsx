@@ -331,9 +331,14 @@ export function TargetConfig({
 
         {(crawlerType === 'creator' || crawlerType === 'creator_vip') && (
           <div className="space-y-1">
-            <Label className="text-xs">创作者 ID</Label>
+            <Label className="text-xs">
+              {crawlerType === 'creator_vip' ? 'VIP创作者 ID' : '创作者 ID'}
+            </Label>
             <p className="text-xs text-muted-foreground mb-1">
-              输入创作者ID/URL按回车添加，支持批量粘贴（逗号/分号/换行分隔），自动去重
+              {crawlerType === 'creator_vip' 
+                ? '输入VIP创作者ID/URL按回车添加，支持批量粘贴（逗号/分号/换行分隔），自动去重'
+                : '输入创作者ID/URL按回车添加，支持批量粘贴（逗号/分号/换行分隔），自动去重'
+              }
             </p>
             <textarea
               placeholder={"示例:\n5533390220\nhttps://weibo.com/u/5533390220"}

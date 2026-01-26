@@ -4,18 +4,26 @@ import { useQuery } from '@tanstack/react-query'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Select } from '@/components/ui/select'
 import { Label } from '@/components/ui/label'
-import { crawlerApi, type SaveOption } from '@/api/crawler'
+import { Input } from '@/components/ui/input'
+import { crawlerApi, type SaveOption, type CrawlerType } from '@/api/crawler'
 
 interface OutputConfigProps {
   saveOption: SaveOption
   enableComments: boolean
   enableSubComments: boolean
   headless: boolean
+  // 增量爬取配置
+  enableIncremental?: boolean
+  incrementalThreshold?: number
+  crawlerType?: CrawlerType
   disabled?: boolean
   onSaveOptionChange: (value: SaveOption) => void
   onEnableCommentsChange: (value: boolean) => void
   onEnableSubCommentsChange: (value: boolean) => void
   onHeadlessChange: (value: boolean) => void
+  // 增量爬取回调
+  onEnableIncrementalChange?: (value: boolean) => void
+  onIncrementalThresholdChange?: (value: number) => void
 }
 
 export function OutputConfig({
@@ -23,11 +31,16 @@ export function OutputConfig({
   enableComments,
   enableSubComments,
   headless,
+  enableIncremental = false,
+  incrementalThreshold = 3,
+  crawlerType,
   disabled,
   onSaveOptionChange,
   onEnableCommentsChange,
   onEnableSubCommentsChange,
   onHeadlessChange,
+  onEnableIncrementalChange,
+  onIncrementalThresholdChange,
 }: OutputConfigProps) {
   // 获取配置选项
   const { data: configResponse } = useQuery({
@@ -36,6 +49,12 @@ export function OutputConfig({
   })
 
   const saveOptions = configResponse?.data?.save_options || []
+  const incrementalConfig = configResponse?.data?.incremental_config
+  
+  // 判断当前是否支持增量爬取
+  const supportsIncremental = incrementalConfig && 
+    crawlerType && 
+    incrementalConfig.supports_crawler_types.includes(crawlerType)
 
   return (
     <Card className="h-full">
@@ -120,6 +139,55 @@ export function OutputConfig({
               <span className="text-sm">无头模式</span>
             </div>
           </label>
+          
+          {/* 增量爬取配置 - 仅在创作者模式下显示 */}
+          {supportsIncremental && (
+            <>
+              <label
+                htmlFor="enable-incremental"
+                className="flex items-center justify-between py-1.5 px-3 bg-cyan-500/10 border border-cyan-500/20 rounded-md cursor-pointer hover:bg-cyan-500/15 transition-colors"
+                title="增量爬取：只爬取新内容，效率提升10-100倍"
+              >
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="enable-incremental"
+                    checked={enableIncremental}
+                    onChange={(e) => onEnableIncrementalChange?.(e.target.checked)}
+                    disabled={disabled}
+                    className="w-4 h-4 rounded border-cyan-600 bg-cyan-700 cursor-pointer"
+                  />
+                  <span className="text-sm flex items-center gap-1.5">
+                    <span>⚡</span>
+                    <span>增量爬取</span>
+                  </span>
+                </div>
+                {enableIncremental && (
+                  <span className="text-xs text-cyan-400 font-medium">高效模式</span>
+                )}
+              </label>
+              
+              {/* 早停阈值 - 仅在启用增量时显示 */}
+              {enableIncremental && (
+                <div className="space-y-1 ml-6 pl-2 border-l-2 border-cyan-500/30">
+                  <Label className="text-xs text-muted-foreground">早停阈值</Label>
+                  <Input
+                    type="number"
+                    value={incrementalThreshold}
+                    onChange={(e) => onIncrementalThresholdChange?.(Number(e.target.value))}
+                    disabled={disabled}
+                    min={incrementalConfig?.threshold_range.min || 1}
+                    max={incrementalConfig?.threshold_range.max || 10}
+                    className="h-8 text-sm"
+                    placeholder="连续N条已存在就停止"
+                  />
+                  <p className="text-xs text-muted-foreground/60">
+                    连续 {incrementalThreshold} 条已存在内容就停止爬取
+                  </p>
+                </div>
+              )}
+            </>
+          )}
         </div>
       </CardContent>
     </Card>

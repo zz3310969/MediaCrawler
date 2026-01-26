@@ -18,11 +18,17 @@
 
 import os
 import json
+import sys
 from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
+
+# Add project root to sys.path
+project_root = Path(__file__).resolve().parents[2]
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
 
 router = APIRouter(prefix="/data", tags=["data"])
 
@@ -228,3 +234,117 @@ async def get_data_stats():
                 continue
 
     return stats
+
+
+@router.get("/cos/check")
+async def check_cos_config():
+    """检查腾讯云COS配置状态"""
+    try:
+        from tools.oss_uploader import COSUploader
+        import config
+        
+        uploader = COSUploader()
+        
+        # 检查配置项
+        config_items = {
+            "secret_id": uploader.secret_id,
+            "secret_key": uploader.secret_key,
+            "region": uploader.region,
+            "bucket_name": uploader.bucket_name,
+            "path_prefix": uploader.path_prefix,
+        }
+        
+        # 检查是否配置完整
+        is_configured = uploader.is_configured()
+        
+        # 配置状态详情
+        config_status = {}
+        for key, value in config_items.items():
+            if key in ["secret_id", "secret_key"]:
+                # 隐藏敏感信息
+                if value:
+                    config_status[key] = {
+                        "configured": True,
+                        "value": f"{value[:8]}..." if len(value) > 8 else "***",
+                        "length": len(value)
+                    }
+                else:
+                    config_status[key] = {
+                        "configured": False,
+                        "value": "",
+                        "error": "未配置"
+                    }
+            else:
+                # 非敏感信息直接显示
+                config_status[key] = {
+                    "configured": bool(value),
+                    "value": value or "",
+                }
+        
+        # 如果配置完整，测试上传
+        upload_test_result = None
+        if is_configured:
+            try:
+                # 测试上传一个小文件
+                test_content = b"MediaCrawler COS Test"
+                test_filename = "test_connection.txt"
+                
+                url = await uploader.upload_bytes(
+                    test_content,
+                    test_filename,
+                    "text/plain"
+                )
+                
+                if url:
+                    upload_test_result = {
+                        "success": True,
+                        "message": "上传测试成功",
+                        "test_url": url
+                    }
+                else:
+                    upload_test_result = {
+                        "success": False,
+                        "message": "上传测试失败，但配置项完整"
+                    }
+            except Exception as e:
+                upload_test_result = {
+                    "success": False,
+                    "message": f"上传测试失败: {str(e)}",
+                    "error": str(e)
+                }
+        
+        # VIP海报保存模式
+        vip_poster_save_mode = getattr(config, 'VIP_POSTER_SAVE_MODE', 'local')
+        
+        return {
+            "is_configured": is_configured,
+            "config_status": config_status,
+            "upload_test": upload_test_result,
+            "vip_poster_save_mode": vip_poster_save_mode,
+            "message": "COS配置完整，可以正常使用" if is_configured else "COS配置不完整，请检查配置项",
+            "help": {
+                "doc_url": "docs/tencent_cos_config_guide.md",
+                "config_file": "config/weibo_config.py",
+                "env_vars": [
+                    "COS_SECRET_ID",
+                    "COS_SECRET_KEY",
+                    "COS_REGION",
+                    "COS_BUCKET_NAME",
+                    "COS_PATH_PREFIX"
+                ]
+            }
+        }
+    
+    except ImportError as e:
+        return {
+            "is_configured": False,
+            "error": "cos-python-sdk-v5 未安装",
+            "message": "请运行: pip install cos-python-sdk-v5",
+            "detail": str(e)
+        }
+    except Exception as e:
+        return {
+            "is_configured": False,
+            "error": str(e),
+            "message": "检查COS配置时发生错误"
+        }

@@ -1,0 +1,26 @@
+{
+  "platform": "wb",
+  "crawler_type": "creator_vip",
+  "task_id": "wb_creator_vip_20260126_191110_a749e33e",
+  "started_at": "2026-01-26T19:11:10.591269",
+  "updated_at": "2026-01-26T19:49:19.298478",
+  "status": "completed",
+  "keywords": [],
+  "current_keyword_index": 0,
+  "current_page": 1,
+  "creator_ids": [],
+  "current_creator_index": 0,
+  "vip_creator_ids": [
+    "7943876498"
+  ],
+  "current_vip_creator_index": 0,
+  "note_ids": [],
+  "current_note_index": 0,
+  "processed_note_ids": [],
+  "processed_comment_note_ids": [],
+  "total_notes_crawled": 0,
+  "total_comments_crawled": 0,
+  "total_creators_crawled": 0,
+  "last_error": "Page.evaluate: Target page, context or browser has been closed",
+  "error_count": 1
+}

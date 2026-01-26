@@ -231,6 +231,12 @@ class CrawlerManager:
             cmd.extend(["--cookies", config.cookies])
 
         cmd.extend(["--headless", "true" if config.headless else "false"])
+        
+        # 增量爬取参数
+        if config.enable_incremental:
+            cmd.extend(["--enable_incremental", "true"])
+            if config.incremental_early_stop != 3:  # 只在非默认值时传递
+                cmd.extend(["--incremental_threshold", str(config.incremental_early_stop)])
 
         return cmd
 

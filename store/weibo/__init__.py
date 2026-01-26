@@ -202,11 +202,12 @@ async def save_creator(user_id: str, user_info: Dict):
     await WeibostoreFactory.create_store().store_creator(local_db_item)
 
 
-async def batch_update_weibo_vip_contents(vip_content_list: List[Dict]):
+async def batch_update_weibo_vip_contents(vip_content_list: List[Dict], vuid: str = ""):
     """
     Batch update weibo VIP contents
     Args:
         vip_content_list: List of VIP content items
+        vuid: VIP creator user ID
 
     Returns:
 
@@ -214,14 +215,15 @@ async def batch_update_weibo_vip_contents(vip_content_list: List[Dict]):
     if not vip_content_list:
         return
     for vip_item in vip_content_list:
-        await update_weibo_vip_content(vip_item)
+        await update_weibo_vip_content(vip_item, vuid=vuid)
 
 
-async def update_weibo_vip_content(vip_item: Dict):
+async def update_weibo_vip_content(vip_item: Dict, vuid: str = ""):
     """
     Update weibo VIP content
     Args:
         vip_item: VIP content item from API response
+        vuid: VIP creator user ID
 
     Returns:
 
@@ -248,6 +250,7 @@ async def update_weibo_vip_content(vip_item: Dict):
     save_content_item = {
         "note_id": mid,
         "oid": oid,
+        "vuid": vuid,  # 🔥 添加VIP创作者ID（关键字段！）
         "content": title,
         "note_url": url,
         "scheme": scheme,

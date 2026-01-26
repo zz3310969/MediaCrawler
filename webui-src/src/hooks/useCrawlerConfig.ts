@@ -18,6 +18,9 @@ const DEFAULT_CONFIG: CrawlerStartRequest = {
   save_option: 'json',
   cookies: '',
   headless: false,
+  // 增量爬取配置
+  enable_incremental: false,
+  incremental_early_stop: 3,
 }
 
 export function useCrawlerConfig() {

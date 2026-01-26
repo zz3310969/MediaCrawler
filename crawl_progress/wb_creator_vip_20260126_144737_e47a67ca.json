@@ -1,0 +1,26 @@
+{
+  "platform": "wb",
+  "crawler_type": "creator_vip",
+  "task_id": "wb_creator_vip_20260126_144737_e47a67ca",
+  "started_at": "2026-01-26T14:47:37.744082",
+  "updated_at": "2026-01-26T18:07:12.582487",
+  "status": "completed",
+  "keywords": [],
+  "current_keyword_index": 0,
+  "current_page": 1,
+  "creator_ids": [],
+  "current_creator_index": 0,
+  "vip_creator_ids": [
+    "7948230240"
+  ],
+  "current_vip_creator_index": 0,
+  "note_ids": [],
+  "current_note_index": 0,
+  "processed_note_ids": [],
+  "processed_comment_note_ids": [],
+  "total_notes_crawled": 0,
+  "total_comments_crawled": 0,
+  "total_creators_crawled": 0,
+  "last_error": "(sqlite3.OperationalError) no such table: weibo_vip_note\n[SQL: SELECT weibo_vip_note.id, weibo_vip_note.add_ts, weibo_vip_note.last_modify_ts, weibo_vip_note.note_id, weibo_vip_note.oid, weibo_vip_note.vuid, weibo_vip_note.content, weibo_vip_note.note_url, weibo_vip_note.scheme, weibo_vip_note.page_view, weibo_vip_note.poster_url, weibo_vip_note.poster_local_path, weibo_vip_note.poster_oss_url, weibo_vip_note.content_type, weibo_vip_note.money, weibo_vip_note.date, weibo_vip_note.source_keyword \nFROM weibo_vip_note \nWHERE weibo_vip_note.note_id = ?]\n[parameters: ('5258910711941614',)]\n(Background on this error at: https://sqlalche.me/e/20/e3q8)",
+  "error_count": 2
+}

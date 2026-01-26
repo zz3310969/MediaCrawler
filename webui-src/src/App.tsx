@@ -65,7 +65,19 @@ function MainApp() {
     if (isRunning) {
       stopMutation.mutate()
     } else {
-      startMutation.mutate(config)
+      // 根据爬取类型正确映射字段
+      const requestData = { ...config }
+      
+      // creator_vip 模式：creator_ids → vip_creator_ids
+      if (config.crawler_type === 'creator_vip') {
+        requestData.vip_creator_ids = config.creator_ids
+        requestData.creator_ids = ''  // 清空普通创作者ID
+      } else if (config.crawler_type === 'creator') {
+        // creator 模式：保持 creator_ids
+        requestData.vip_creator_ids = ''  // 清空VIP创作者ID
+      }
+      
+      startMutation.mutate(requestData)
     }
   }
 
@@ -139,11 +151,16 @@ function MainApp() {
             enableComments={config.enable_comments || false}
             enableSubComments={config.enable_sub_comments || false}
             headless={config.headless || false}
+            enableIncremental={config.enable_incremental || false}
+            incrementalThreshold={config.incremental_early_stop || 3}
+            crawlerType={config.crawler_type}
             disabled={isRunning}
             onSaveOptionChange={(value) => updateConfig({ save_option: value })}
             onEnableCommentsChange={(value) => updateConfig({ enable_comments: value })}
             onEnableSubCommentsChange={(value) => updateConfig({ enable_sub_comments: value })}
             onHeadlessChange={(value) => updateConfig({ headless: value })}
+            onEnableIncrementalChange={(value) => updateConfig({ enable_incremental: value })}
+            onIncrementalThresholdChange={(value) => updateConfig({ incremental_early_stop: value })}
           />
         </div>
 
