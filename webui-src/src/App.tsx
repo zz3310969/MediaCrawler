@@ -103,9 +103,9 @@ function MainApp() {
       </header>
 
       {/* 主内容区 */}
-      <main className="flex-1 container mx-auto px-6 py-4 overflow-y-auto">
+      <main className="flex-1 container mx-auto px-6 py-3 overflow-y-auto">
         {/* 三列配置卡片 */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
           {/* 目标配置 */}
           <TargetConfig
             platform={config.platform}
@@ -147,11 +147,11 @@ function MainApp() {
         </div>
 
         {/* 启动按钮 */}
-        <div className="mb-4">
+        <div className="mb-3">
           <Button
             onClick={handleStartStop}
             disabled={startMutation.isPending || stopMutation.isPending}
-            className="w-full h-12 text-lg font-medium bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 text-white shadow-lg shadow-cyan-500/20"
+            className="w-full h-10 text-base font-medium bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 text-white shadow-lg shadow-cyan-500/20"
           >
             {isRunning ? (
               <>⏸ 停止爬虫</>
@@ -162,7 +162,7 @@ function MainApp() {
         </div>
 
         {/* 终端日志 - 自适应剩余高度 */}
-        <div className="pb-4">
+        <div className="pb-3">
           <TerminalLog />
         </div>
       </main>

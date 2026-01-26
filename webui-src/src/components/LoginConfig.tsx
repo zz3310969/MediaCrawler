@@ -31,7 +31,7 @@ export function LoginConfig({
 
   return (
     <Card className="h-full">
-      <CardHeader className="pb-3">
+      <CardHeader className="pb-1.5 pt-3 px-4">
         <div className="flex items-center gap-2">
           <Key className="h-5 w-5 text-green-400" />
           <div className="flex items-baseline gap-2">
@@ -43,9 +43,9 @@ export function LoginConfig({
         </div>
       </CardHeader>
 
-      <CardContent className="space-y-3">
+      <CardContent className="space-y-2 px-4 pb-3">
         {/* 登录方式 */}
-        <div className="space-y-1.5">
+        <div className="space-y-1">
           <Label className="text-xs">登录方式</Label>
           <Select
             value={loginType}
@@ -62,7 +62,7 @@ export function LoginConfig({
 
         {/* Cookie 输入框（仅在 Cookie 登录时显示） */}
         {loginType === 'cookie' && (
-          <div className="space-y-1.5">
+          <div className="space-y-1">
             <Label className="text-xs">Cookies</Label>
             <p className="text-xs text-muted-foreground">粘贴 Cookie 字符串</p>
             <textarea
@@ -70,7 +70,7 @@ export function LoginConfig({
               value={cookies}
               onChange={(e) => onCookiesChange?.(e.target.value)}
               disabled={disabled}
-              className="w-full h-24 px-3 py-2 text-sm rounded-md border border-input bg-background resize-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="w-full h-20 px-3 py-2 text-sm rounded-md border border-input bg-background resize-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring placeholder:text-xs placeholder:text-muted-foreground"
             />
           </div>
         )}

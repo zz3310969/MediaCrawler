@@ -133,7 +133,7 @@ export function TargetConfig({
 
   return (
     <Card className="h-full">
-      <CardHeader className="pb-3">
+      <CardHeader className="pb-1.5 pt-3 px-4">
         <div className="flex items-center gap-2">
           <Globe className="h-5 w-5 text-blue-400" />
           <div className="flex items-baseline gap-2">
@@ -145,9 +145,9 @@ export function TargetConfig({
         </div>
       </CardHeader>
 
-      <CardContent className="space-y-3">
+      <CardContent className="space-y-2 px-4 pb-3">
         {/* 平台选择 */}
-        <div className="space-y-1.5">
+        <div className="space-y-1">
           <Label className="text-xs">平台</Label>
           <Select
             value={platform}
@@ -163,9 +163,9 @@ export function TargetConfig({
         </div>
 
         {/* 爬取类型和起始页（同一行） */}
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-2 gap-2">
           {/* 爬取类型 */}
-          <div className="space-y-1.5">
+          <div className="space-y-1">
             <Label className="text-xs">爬取类型</Label>
             <Select
               value={crawlerType}
@@ -181,7 +181,7 @@ export function TargetConfig({
           </div>
 
           {/* 起始页 */}
-          <div className="space-y-1.5">
+          <div className="space-y-1">
             <Label className="text-xs">起始页</Label>
             <Input
               type="number"
@@ -189,14 +189,13 @@ export function TargetConfig({
               onChange={(e) => onStartPageChange(Number(e.target.value))}
               disabled={disabled}
               min={1}
-              className="h-9"
             />
           </div>
         </div>
 
         {/* 根据爬取类型显示不同输入 */}
         {crawlerType === 'search' && (
-          <div className="space-y-1.5">
+          <div className="space-y-1">
             <Label className="text-xs">关键词</Label>
             <p className="text-xs text-muted-foreground mb-1">
               输入关键词按回车添加，多个用逗号分隔
@@ -207,7 +206,7 @@ export function TargetConfig({
               onChange={(e) => setInputValue(e.target.value)}
               onKeyDown={handleKeywordKeyDown}
               disabled={disabled}
-              className="h-9"
+              className="h-8"
             />
             {/* 显示已添加的关键词标签 */}
             {keywordList.length > 0 && (
@@ -233,7 +232,7 @@ export function TargetConfig({
         )}
 
         {crawlerType === 'detail' && (
-          <div className="space-y-1.5">
+          <div className="space-y-1">
             <Label className="text-xs">帖子ID</Label>
             <p className="text-xs text-muted-foreground mb-1">
               输入帖子ID，按回车添加
@@ -244,7 +243,7 @@ export function TargetConfig({
               onChange={(e) => setDetailInputValue(e.target.value)}
               onKeyDown={handleDetailKeyDown}
               disabled={disabled}
-              className="w-full h-[72px] px-3 py-2 text-sm rounded-md border border-input bg-background font-mono resize-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="w-full h-16 px-3 py-2 text-sm rounded-md border border-input bg-background font-mono resize-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring placeholder:text-xs placeholder:text-muted-foreground"
             />
             {/* 显示已添加的帖子ID标签 */}
             {detailList.length > 0 && (
@@ -270,7 +269,7 @@ export function TargetConfig({
         )}
 
         {crawlerType === 'creator' && (
-          <div className="space-y-1.5">
+          <div className="space-y-1">
             <Label className="text-xs">创作者 ID</Label>
             <p className="text-xs text-muted-foreground mb-1">
               输入创作者的ID/URL，按回车添加
@@ -281,7 +280,7 @@ export function TargetConfig({
               onChange={(e) => setCreatorInputValue(e.target.value)}
               onKeyDown={handleCreatorKeyDown}
               disabled={disabled}
-              className="w-full h-[72px] px-3 py-2 text-sm rounded-md border border-input bg-background font-mono resize-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="w-full h-16 px-3 py-2 text-sm rounded-md border border-input bg-background font-mono resize-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring placeholder:text-xs placeholder:text-muted-foreground"
             />
             {/* 显示已添加的创作者ID标签 */}
             {creatorList.length > 0 && (

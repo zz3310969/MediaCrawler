@@ -47,7 +47,7 @@ export function ThemeToggle() {
       {/* 按钮 */}
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-2 px-3 py-1.5 text-sm text-gray-400 bg-slate-800/50 border border-slate-700 rounded-md hover:bg-slate-800 hover:text-gray-300 transition-colors"
+        className="flex items-center gap-2 px-3 py-1.5 text-sm text-gray-600 dark:text-gray-400 bg-slate-100 dark:bg-slate-800/50 border border-slate-300 dark:border-slate-700 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-800 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
       >
         <CurrentIcon className="h-4 w-4" />
         <span className="capitalize">{theme}</span>
@@ -64,7 +64,7 @@ export function ThemeToggle() {
           />
           
           {/* 菜单内容 */}
-          <div className="absolute right-0 mt-2 w-48 bg-slate-800 border border-slate-700 rounded-lg shadow-xl z-20 overflow-hidden">
+          <div className="absolute right-0 mt-2 w-36 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-2xl z-20 overflow-hidden">
             {themeOptions.map((option) => {
               const Icon = option.icon
               const isSelected = theme === option.value
@@ -73,15 +73,17 @@ export function ThemeToggle() {
                 <button
                   key={option.value}
                   onClick={() => handleThemeChange(option.value)}
-                  className={`w-full flex items-center justify-between px-4 py-3 text-sm hover:bg-slate-700/50 transition-colors ${
-                    isSelected ? 'bg-cyan-500/10 text-cyan-400' : 'text-gray-300'
+                  className={`w-full flex items-center justify-between px-4 py-3 text-sm transition-all ${
+                    isSelected 
+                      ? 'bg-cyan-50 dark:bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 font-medium' 
+                      : 'text-gray-700 dark:text-gray-300 hover:bg-slate-50 dark:hover:bg-slate-700/50'
                   }`}
                 >
                   <div className="flex items-center gap-3">
-                    <Icon className="h-4 w-4" />
+                    <Icon className={`h-5 w-5 ${isSelected ? 'text-cyan-500 dark:text-cyan-400' : ''}`} />
                     <span>{option.label}</span>
                   </div>
-                  {isSelected && <Check className="h-4 w-4 text-cyan-400" />}
+                  {isSelected && <Check className="h-5 w-5 text-cyan-500 dark:text-cyan-400" />}
                 </button>
               )
             })}

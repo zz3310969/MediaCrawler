@@ -39,7 +39,7 @@ export function OutputConfig({
 
   return (
     <Card className="h-full">
-      <CardHeader className="pb-3">
+      <CardHeader className="pb-1.5 pt-3 px-4">
         <div className="flex items-center gap-2">
           <FileOutput className="h-5 w-5 text-purple-400" />
           <div className="flex items-baseline gap-2">
@@ -51,9 +51,9 @@ export function OutputConfig({
         </div>
       </CardHeader>
 
-      <CardContent className="space-y-3">
+      <CardContent className="space-y-2 px-4 pb-3">
         {/* 保存格式 */}
-        <div className="space-y-1.5">
+        <div className="space-y-1">
           <Label className="text-xs">保存格式</Label>
           <Select
             value={saveOption}
@@ -69,10 +69,10 @@ export function OutputConfig({
         </div>
 
         {/* 爬取选项 */}
-        <div className="space-y-3 pt-2">
+        <div className="space-y-2 pt-1.5">
           <label
             htmlFor="enable-comments"
-            className="flex items-center justify-between py-2 px-3 bg-secondary/50 rounded-md cursor-pointer hover:bg-secondary/70 transition-colors"
+            className="flex items-center justify-between py-1.5 px-3 bg-secondary/50 rounded-md cursor-pointer hover:bg-secondary/70 transition-colors"
           >
             <div className="flex items-center gap-2">
               <input
@@ -89,7 +89,7 @@ export function OutputConfig({
 
           <label
             htmlFor="enable-sub-comments"
-            className="flex items-center justify-between py-2 px-3 bg-secondary/50 rounded-md cursor-pointer hover:bg-secondary/70 transition-colors"
+            className="flex items-center justify-between py-1.5 px-3 bg-secondary/50 rounded-md cursor-pointer hover:bg-secondary/70 transition-colors"
           >
             <div className="flex items-center gap-2">
               <input
@@ -106,7 +106,7 @@ export function OutputConfig({
 
           <label
             htmlFor="headless"
-            className="flex items-center justify-between py-2 px-3 bg-secondary/50 rounded-md cursor-pointer hover:bg-secondary/70 transition-colors"
+            className="flex items-center justify-between py-1.5 px-3 bg-secondary/50 rounded-md cursor-pointer hover:bg-secondary/70 transition-colors"
           >
             <div className="flex items-center gap-2">
               <input

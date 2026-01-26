@@ -158,7 +158,7 @@ export function TerminalLog() {
       {/* 日志内容区域 */}
       <div 
         ref={scrollContainerRef}
-        className="h-[calc(100vh-600px)] min-h-[250px] max-h-[400px] overflow-y-auto p-4 font-mono text-xs bg-[#0d1117]"
+        className="h-[calc(100vh-580px)] min-h-[200px] max-h-[350px] overflow-y-auto p-3 font-mono text-xs bg-[#0d1117]"
       >
         {showLogo && (
           <div className="text-cyan-500/60 leading-tight mb-4">
