@@ -41,10 +41,20 @@ export function TerminalLog() {
 
   // WebSocket 连接
   const { isConnected } = useWebSocket({
-    url: '/ws/logs',
+    url: '/api/ws/logs',
     onMessage: (data: LogEntry) => {
+      console.log('收到 WebSocket 消息:', data)
       setLogs((prev) => [...prev, data])
       setShowLogo(false)
+    },
+    onOpen: () => {
+      console.log('WebSocket 已连接')
+    },
+    onClose: () => {
+      console.log('WebSocket 已断开')
+    },
+    onError: (error) => {
+      console.error('WebSocket 错误:', error)
     },
   })
 
