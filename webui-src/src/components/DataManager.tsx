@@ -6,47 +6,11 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { crawlerApi, type DataFile } from '@/api/crawler'
+import { formatFileSize, formatDate, extractCategory } from '@/lib/formatters'
 
 interface DataManagerProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-}
-
-// 格式化文件大小
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(2)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`
-}
-
-// 格式化时间
-function formatDate(timestamp: number): string {
-  const date = new Date(timestamp * 1000)
-  return date.toLocaleString('zh-CN', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).replace(/\//g, '/')
-}
-
-// 提取文件类别（从路径中）
-function extractCategory(filePath: string): string {
-  const match = filePath.match(/^([^/]+)\//)
-  if (match) {
-    const platform = match[1]
-    return platform
-  }
-  
-  // 从文件名推断
-  if (filePath.includes('vip_contents')) return 'Vip'
-  if (filePath.includes('_contents_')) return 'Contents'
-  if (filePath.includes('comments')) return 'Comments'
-  if (filePath.includes('creator_content')) return 'Creator Contents'
-  if (filePath.includes('creator_creator')) return 'Creator Creators'
-  
-  return 'Other'
 }
 
 export function DataManager({ open, onOpenChange }: DataManagerProps) {

@@ -1,19 +1,21 @@
-import { useState } from 'react'
 import { QueryClient, QueryClientProvider, useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Play, AlertTriangle } from 'lucide-react'
+import { AlertTriangle } from 'lucide-react'
 import { TargetConfig } from './components/TargetConfig'
 import { LoginConfig } from './components/LoginConfig'
 import { OutputConfig } from './components/OutputConfig'
 import { TerminalLog } from './components/TerminalLog'
 import { ThemeToggle } from './components/ThemeToggle'
+import { ToastContainer, toast } from './components/ui/toast'
 import { Button } from './components/ui/button'
-import { crawlerApi, type CrawlerStartRequest, type Platform, type LoginType, type CrawlerType, type SaveOption } from './api/crawler'
+import { useCrawlerConfig } from './hooks/useCrawlerConfig'
+import { crawlerApi } from './api/crawler'
+import { QUERY_CONFIG } from './lib/constants'
 
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       refetchOnWindowFocus: false,
-      retry: 1,
+      retry: QUERY_CONFIG.RETRY_COUNT,
     },
   },
 })
@@ -21,47 +23,14 @@ const queryClient = new QueryClient({
 function MainApp() {
   const queryClient = useQueryClient()
   
-  // 爬虫配置状态
-  const [config, setConfig] = useState<CrawlerStartRequest>({
-    platform: 'bili',
-    login_type: 'qrcode',
-    crawler_type: 'search',
-    keywords: '',
-    specified_ids: '',
-    creator_ids: '',
-    start_page: 1,
-    enable_comments: true,
-    enable_sub_comments: false,
-    save_option: 'json',
-    cookies: '',
-    headless: false,
-  })
-
-  // 处理爬取类型变化，清空相关字段
-  const handleCrawlerTypeChange = (value: CrawlerType) => {
-    setConfig({
-      ...config,
-      crawler_type: value,
-      keywords: '',
-      specified_ids: '',
-      creator_ids: '',
-    })
-  }
-
-  // 处理登录方式变化
-  const handleLoginTypeChange = (value: LoginType) => {
-    setConfig({
-      ...config,
-      login_type: value,
-      cookies: value === 'cookie' ? config.cookies : '',
-    })
-  }
+  // 使用自定义 Hook 管理配置
+  const { config, updateConfig, handleCrawlerTypeChange, handleLoginTypeChange } = useCrawlerConfig()
 
   // 查询爬虫状态
   const { data: status } = useQuery({
     queryKey: ['crawler-status'],
     queryFn: crawlerApi.getStatus,
-    refetchInterval: 1000,
+    refetchInterval: QUERY_CONFIG.STATUS_REFETCH_INTERVAL,
   })
 
   // 启动爬虫
@@ -69,9 +38,10 @@ function MainApp() {
     mutationFn: crawlerApi.start,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['crawler-status'] })
+      toast.success('爬虫启动成功！')
     },
     onError: (error: Error) => {
-      alert('启动失败: ' + error.message)
+      toast.error(`启动失败: ${error.message}`)
     },
   })
 
@@ -80,6 +50,10 @@ function MainApp() {
     mutationFn: crawlerApi.stop,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['crawler-status'] })
+      toast.info('爬虫已停止')
+    },
+    onError: (error: Error) => {
+      toast.error(`停止失败: ${error.message}`)
     },
   })
 
@@ -141,12 +115,12 @@ function MainApp() {
             creatorIds={config.creator_ids}
             startPage={config.start_page}
             disabled={isRunning}
-            onPlatformChange={(value) => setConfig({ ...config, platform: value })}
+            onPlatformChange={(value) => updateConfig({ platform: value })}
             onCrawlerTypeChange={handleCrawlerTypeChange}
-            onKeywordsChange={(value) => setConfig({ ...config, keywords: value })}
-            onSpecifiedIdsChange={(value) => setConfig({ ...config, specified_ids: value })}
-            onCreatorIdsChange={(value) => setConfig({ ...config, creator_ids: value })}
-            onStartPageChange={(value) => setConfig({ ...config, start_page: value })}
+            onKeywordsChange={(value) => updateConfig({ keywords: value })}
+            onSpecifiedIdsChange={(value) => updateConfig({ specified_ids: value })}
+            onCreatorIdsChange={(value) => updateConfig({ creator_ids: value })}
+            onStartPageChange={(value) => updateConfig({ start_page: value })}
           />
 
           {/* 登录配置 */}
@@ -155,7 +129,7 @@ function MainApp() {
             cookies={config.cookies}
             disabled={isRunning}
             onLoginTypeChange={handleLoginTypeChange}
-            onCookiesChange={(value) => setConfig({ ...config, cookies: value })}
+            onCookiesChange={(value) => updateConfig({ cookies: value })}
           />
 
           {/* 输出配置 */}
@@ -165,10 +139,10 @@ function MainApp() {
             enableSubComments={config.enable_sub_comments}
             headless={config.headless}
             disabled={isRunning}
-            onSaveOptionChange={(value) => setConfig({ ...config, save_option: value })}
-            onEnableCommentsChange={(value) => setConfig({ ...config, enable_comments: value })}
-            onEnableSubCommentsChange={(value) => setConfig({ ...config, enable_sub_comments: value })}
-            onHeadlessChange={(value) => setConfig({ ...config, headless: value })}
+            onSaveOptionChange={(value) => updateConfig({ save_option: value })}
+            onEnableCommentsChange={(value) => updateConfig({ enable_comments: value })}
+            onEnableSubCommentsChange={(value) => updateConfig({ enable_sub_comments: value })}
+            onHeadlessChange={(value) => updateConfig({ headless: value })}
           />
         </div>
 
@@ -207,6 +181,7 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <MainApp />
+      <ToastContainer />
     </QueryClientProvider>
   )
 }

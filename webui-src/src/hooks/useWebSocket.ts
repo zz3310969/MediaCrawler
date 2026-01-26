@@ -1,5 +1,6 @@
 // WebSocket Hook
 import { useEffect, useRef, useState } from 'react'
+import { WEBSOCKET_CONFIG } from '@/lib/constants'
 
 interface UseWebSocketOptions {
   url: string
@@ -18,7 +19,7 @@ export function useWebSocket({
   onClose,
   onError,
   autoReconnect = true,
-  reconnectInterval = 3000,
+  reconnectInterval = WEBSOCKET_CONFIG.RECONNECT_INTERVAL,
 }: UseWebSocketOptions) {
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimerRef = useRef<NodeJS.Timeout>()

@@ -27,6 +27,7 @@ const ASCII_LOGO = `
 
 export function TerminalLog() {
   const [logs, setLogs] = useState<LogEntry[]>([])
+  const [logFilter, setLogFilter] = useState<string>('all') // 日志过滤器
   const bottomRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const [showLogo, setShowLogo] = useState(true)
@@ -74,8 +75,6 @@ export function TerminalLog() {
     return statusMap[status?.status || 'idle'] || statusMap.idle
   }
 
-  const statusDisplay = getStatusDisplay()
-
   // 自动滚动到底部
   useEffect(() => {
     if (bottomRef.current) {
@@ -88,6 +87,14 @@ export function TerminalLog() {
     setLogs([])
     setShowLogo(true)
   }
+
+  // 获取状态显示
+  const statusDisplay = getStatusDisplay()
+  
+  // 过滤日志
+  const filteredLogs = logFilter === 'all' 
+    ? logs 
+    : logs.filter(log => log.level === logFilter)
 
   return (
     <>
@@ -109,8 +116,23 @@ export function TerminalLog() {
           <div className="flex items-center gap-2">
             <div className="flex items-center gap-1 px-2 py-1 text-xs text-gray-400">
               <FileText className="h-3 w-3" />
-              <span>{logs.length} 条记录</span>
+              <span>{filteredLogs.length} / {logs.length} 条记录</span>
             </div>
+            
+            {/* 日志过滤器 */}
+            <select
+              value={logFilter}
+              onChange={(e) => setLogFilter(e.target.value)}
+              className="h-7 px-2 text-xs bg-transparent border border-gray-700 rounded text-gray-400 hover:text-gray-200"
+            >
+              <option value="all">全部</option>
+              <option value="info">信息</option>
+              <option value="success">成功</option>
+              <option value="warning">警告</option>
+              <option value="error">错误</option>
+              <option value="debug">调试</option>
+            </select>
+            
             <Button
               variant="ghost"
               size="sm"
@@ -147,14 +169,17 @@ export function TerminalLog() {
           </div>
         )}
 
-        {logs.length === 0 && !showLogo && (
+        {logs.length === 0 && !showLogo ? (
           <div className="text-gray-600 text-center py-8">
             等待日志输出...
           </div>
-        )}
-
-        {logs.map((log) => (
-          <div key={log.id} className="py-1 hover:bg-gray-900/30">
+        ) : logs.length > 0 && filteredLogs.length === 0 ? (
+          <div className="text-gray-600 text-center py-8">
+            当前筛选条件下没有日志
+          </div>
+        ) : (
+          filteredLogs.map((log) => (
+            <div key={log.id} className="py-1 hover:bg-gray-900/30">
             <span className="text-gray-600">
               [{log.timestamp}]
             </span>
@@ -168,7 +193,8 @@ export function TerminalLog() {
               {log.message}
             </span>
           </div>
-        ))}
+          ))
+        )}
         <div ref={bottomRef} />
       </div>
     </div>
