@@ -40,13 +40,13 @@ export function TargetConfig({
   onStartPageChange,
 }: TargetConfigProps) {
   // 获取平台列表
-  const { data: platformsData } = useQuery({
+  const { data: platformsResponse } = useQuery({
     queryKey: ['platforms'],
     queryFn: crawlerApi.getPlatforms,
   })
 
   // 获取配置选项
-  const { data: configOptions } = useQuery({
+  const { data: configResponse } = useQuery({
     queryKey: ['config-options'],
     queryFn: crawlerApi.getConfigOptions,
   })
@@ -65,8 +65,8 @@ export function TargetConfig({
   // 获取创作者ID数组
   const creatorList = creatorIds ? creatorIds.split(',').filter(k => k.trim()) : []
 
-  const platforms = platformsData?.data?.platforms || []
-  const crawlerTypes = configOptions?.data?.crawler_types || []
+  const platforms = platformsResponse?.data?.platforms || []
+  const crawlerTypes = configResponse?.data?.crawler_types || []
 
   // 处理回车键添加关键词
   const handleKeywordKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {

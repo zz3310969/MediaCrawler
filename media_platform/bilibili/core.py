@@ -443,20 +443,69 @@ class BilibiliCrawler(AbstractCrawler):
 
     async def get_creator_videos(self, creator_id: int):
         """
-        get videos for a creator
+        get videos for a creator - 支持增量爬取
         :return:
         """
+        # 初始化增量爬取处理器
+        self._init_incremental_handler(platform="bili", crawler_type="creator")
+        
         ps = 30
         pn = 1
+        all_videos_info = []
+        
+        # 先获取所有视频信息
         while True:
             result = await self.bili_client.get_creator_videos(creator_id, pn, ps)
-            video_bvids_list = [video["bvid"] for video in result["list"]["vlist"]]
-            await self.get_specified_videos(video_bvids_list)
-            if int(result["page"]["count"]) <= pn * ps:
+            video_list = result.get("list", {}).get("vlist", [])
+            all_videos_info.extend(video_list)
+            
+            if int(result.get("page", {}).get("count", 0)) <= pn * ps:
                 break
             await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
             utils.logger.info(f"[BilibiliCrawler.get_creator_videos] Sleeping for {config.CRAWLER_MAX_SLEEP_SEC} seconds after page {pn}")
             pn += 1
+        
+        # 🔥 增量过滤：使用早停策略过滤已存在的视频
+        video_bvids_list = []
+        if self._has_incremental_handler() and all_videos_info:
+            # 转换B站视频格式以适配增量处理器
+            converted_videos = []
+            for video in all_videos_info:
+                converted_videos.append({
+                    'note_id': str(video.get("bvid", "")),
+                    'title': video.get("title", "")[:50],
+                    'time': video.get("created", 0),
+                })
+            
+            filtered_converted = await self._incremental_handler.process_creator_notes(
+                creator_id=str(creator_id),
+                notes_list=converted_videos,
+                creator_name=""
+            )
+            
+            # 根据过滤结果筛选视频BV号
+            filtered_bvids = {v['note_id'] for v in filtered_converted}
+            video_bvids_list = [
+                video["bvid"] for video in all_videos_info 
+                if video.get("bvid") in filtered_bvids
+            ]
+            
+            # 🔥 更新增量元数据
+            if filtered_converted:
+                latest_video = filtered_converted[0]
+                await self._incremental_handler.update_metadata(
+                    creator_id=str(creator_id),
+                    latest_note=latest_video,
+                    total_new_crawled=len(filtered_converted),
+                    creator_name=""
+                )
+        else:
+            # 不使用增量，全部爬取
+            video_bvids_list = [video["bvid"] for video in all_videos_info]
+        
+        # 处理视频列表
+        if video_bvids_list:
+            await self.get_specified_videos(video_bvids_list)
 
     async def get_specified_videos(self, video_url_list: List[str], progress: Optional["CrawlProgress"] = None):
         """

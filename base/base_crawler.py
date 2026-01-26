@@ -46,6 +46,9 @@ class AbstractCrawler(ABC):
         self._account_pool: Optional["AccountPool"] = None
         self._current_account: Optional["Account"] = None
         self._consecutive_failures: int = 0
+        
+        # 增量爬取相关属性
+        self._incremental_handler = None
     
     def _init_progress_manager(self) -> None:
         """
@@ -379,6 +382,52 @@ class AbstractCrawler(ABC):
         if self._account_pool:
             await self._account_pool.save_accounts()
             utils.logger.info(f"[{self.__class__.__name__}] Account pool saved on close")
+    
+    # ==================== 增量爬取管理方法 ====================
+    
+    def _init_incremental_handler(self, platform: str, crawler_type: str) -> None:
+        """
+        初始化增量爬取处理器（在子类的爬取方法中调用）
+        
+        Args:
+            platform: 平台标识 (xhs, dy, wb, etc.)
+            crawler_type: 爬取类型 (search, creator, detail)
+        """
+        if not config.ENABLE_INCREMENTAL_CRAWL:
+            return
+        
+        from crawler.incremental import (
+            CreatorIncrementalHandler,
+            SearchIncrementalHandler,
+            DetailIncrementalHandler
+        )
+        
+        # 根据爬取类型选择对应的增量处理器
+        if crawler_type == "creator" or crawler_type == "creator_vip":
+            self._incremental_handler = CreatorIncrementalHandler(platform=platform)
+            utils.logger.info(
+                f"[{self.__class__.__name__}] 增量爬取已启用 - 创作者早停模式 "
+                f"(阈值: {config.CREATOR_EARLY_STOP_THRESHOLD})"
+            )
+        elif crawler_type == "search":
+            self._incremental_handler = SearchIncrementalHandler(platform=platform)
+            utils.logger.info(
+                f"[{self.__class__.__name__}] 增量爬取已启用 - 搜索过滤模式 "
+                f"(时间容差: {config.INCREMENTAL_TIME_TOLERANCE}秒)"
+            )
+        elif crawler_type == "detail":
+            self._incremental_handler = DetailIncrementalHandler(platform=platform)
+            utils.logger.info(
+                f"[{self.__class__.__name__}] 增量爬取已启用 - 详情去重模式"
+            )
+        else:
+            utils.logger.warning(
+                f"[{self.__class__.__name__}] 未知的爬取类型: {crawler_type}，增量爬取未启用"
+            )
+    
+    def _has_incremental_handler(self) -> bool:
+        """检查是否已启用增量爬取"""
+        return config.ENABLE_INCREMENTAL_CRAWL and self._incremental_handler is not None
 
     @abstractmethod
     async def start(self):

@@ -453,6 +453,9 @@ class WeiboCrawler(AbstractCrawler):
             creator_ids=list(config.WEIBO_CREATOR_ID_LIST)
         )
         
+        # 初始化增量爬取处理器
+        self._init_incremental_handler(platform="wb", crawler_type="creator")
+        
         # 从进度中获取起始位置
         start_creator_index = progress.current_creator_index
         creator_ids = progress.creator_ids
@@ -467,31 +470,72 @@ class WeiboCrawler(AbstractCrawler):
                 utils.logger.info(f"[WeiboCrawler.get_creators_and_notes] Processing creator {user_id} ({creator_idx + 1}/{len(creator_ids)})")
                 
                 createor_info_res: Dict = await self.wb_client.get_creator_info_by_id(creator_id=user_id)
+                creator_name = ""
                 if createor_info_res:
                     createor_info: Dict = createor_info_res.get("userInfo", {})
                     utils.logger.info(f"[WeiboCrawler.get_creators_and_notes] creator info: {createor_info}")
                     if not createor_info:
                         raise DataFetchError("Get creator info error")
                     await weibo_store.save_creator(user_id, user_info=createor_info)
+                    creator_name = createor_info.get("screen_name", "")
 
-                    # Create a wrapper callback to get full text before saving data
-                    async def save_notes_with_full_text(note_list: List[Dict]):
-                        # If full text fetching is enabled, batch get full text first
-                        updated_note_list = await self.batch_get_notes_full_text(note_list)
+                    # Get all note information of the creator (不使用callback，先获取全部)
+                    all_notes_list = await self.wb_client.get_all_notes_by_creator_id(
+                        creator_id=user_id,
+                        container_id=f"107603{user_id}",
+                        crawl_interval=0,
+                        callback=None,  # 先不处理，等增量过滤后再处理
+                    )
+                    
+                    # 🔥 增量过滤：使用早停策略过滤已存在的笔记
+                    if self._has_incremental_handler():
+                        # 转换微博笔记格式以适配增量处理器
+                        converted_notes = []
+                        for note in all_notes_list:
+                            mblog = note.get("mblog", {})
+                            converted_notes.append({
+                                'note_id': str(mblog.get("id", "")),
+                                'title': mblog.get("text", "")[:50],  # 取前50字作为标题
+                                'time': mblog.get("created_at_timestamp", 0),
+                            })
+                        
+                        filtered_converted = await self._incremental_handler.process_creator_notes(
+                            creator_id=user_id,
+                            notes_list=converted_notes,
+                            creator_name=creator_name
+                        )
+                        
+                        # 根据过滤结果筛选原始笔记
+                        filtered_note_ids = {n['note_id'] for n in filtered_converted}
+                        all_notes_list = [
+                            note for note in all_notes_list 
+                            if str(note.get("mblog", {}).get("id", "")) in filtered_note_ids
+                        ]
+                    
+                    # 处理过滤后的笔记
+                    if all_notes_list:
+                        updated_note_list = await self.batch_get_notes_full_text(all_notes_list)
                         await weibo_store.batch_update_weibo_notes(updated_note_list)
                         # 更新进度中的已处理帖子
                         for note_item in updated_note_list:
                             note_id = note_item.get("mblog", {}).get("id")
                             if note_id:
-                                progress.mark_note_processed(note_id)
-
-                    # Get all note information of the creator
-                    all_notes_list = await self.wb_client.get_all_notes_by_creator_id(
-                        creator_id=user_id,
-                        container_id=f"107603{user_id}",
-                        crawl_interval=0,
-                        callback=save_notes_with_full_text,
-                    )
+                                progress.mark_note_processed(str(note_id))
+                    
+                    # 🔥 更新增量元数据
+                    if self._has_incremental_handler() and all_notes_list:
+                        mblog = all_notes_list[0].get("mblog", {})
+                        latest_note = {
+                            'note_id': str(mblog.get("id", "")),
+                            'title': mblog.get("text", "")[:50],
+                            'time': mblog.get("created_at_timestamp", 0),
+                        }
+                        await self._incremental_handler.update_metadata(
+                            creator_id=user_id,
+                            latest_note=latest_note,
+                            total_new_crawled=len(all_notes_list),
+                            creator_name=creator_name
+                        )
 
                     note_ids = [note_item.get("mblog", {}).get("id") for note_item in all_notes_list if note_item.get("mblog", {}).get("id")]
                     await self.batch_get_notes_comments(note_ids, progress)

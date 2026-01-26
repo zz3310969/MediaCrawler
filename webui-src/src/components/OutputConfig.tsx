@@ -30,12 +30,12 @@ export function OutputConfig({
   onHeadlessChange,
 }: OutputConfigProps) {
   // 获取配置选项
-  const { data: configOptions } = useQuery({
+  const { data: configResponse } = useQuery({
     queryKey: ['config-options'],
     queryFn: crawlerApi.getConfigOptions,
   })
 
-  const saveOptions = configOptions?.data?.save_options || []
+  const saveOptions = configResponse?.data?.save_options || []
 
   return (
     <Card className="h-full">

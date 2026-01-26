@@ -38,11 +38,13 @@ export function CrawlerControl() {
   })
 
   // 查询爬虫状态
-  const { data: status } = useQuery({
+  const { data: statusResponse } = useQuery({
     queryKey: ['crawler-status'],
     queryFn: crawlerApi.getStatus,
     refetchInterval: 1000,
   })
+  
+  const status = statusResponse?.data
 
   // 启动爬虫
   const startMutation = useMutation({
@@ -74,8 +76,8 @@ export function CrawlerControl() {
     stopMutation.mutate()
   }
 
-  const isRunning = status?.data?.status === 'running'
-  const isIdle = status?.data?.status === 'idle'
+  const isRunning = status?.status === 'running'
+  const isIdle = status?.status === 'idle'
 
   return (
     <Card className="w-full">
@@ -84,9 +86,9 @@ export function CrawlerControl() {
           <span>爬虫控制台</span>
           {isRunning && <Loader2 className="h-4 w-4 animate-spin text-green-500" />}
           <Badge variant={isRunning ? 'default' : 'secondary'}>
-            {status?.data?.status === 'running' ? '运行中' : 
-             status?.data?.status === 'stopping' ? '停止中' : 
-             status?.data?.status === 'error' ? '错误' : '空闲'}
+            {status?.status === 'running' ? '运行中' : 
+             status?.status === 'stopping' ? '停止中' : 
+             status?.status === 'error' ? '错误' : '空闲'}
           </Badge>
         </CardTitle>
         <CardDescription>
@@ -251,9 +253,9 @@ export function CrawlerControl() {
         </div>
 
         {/* 错误信息 */}
-        {status?.data?.error_message && (
+        {status?.error_message && (
           <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-md text-red-400 text-sm">
-            {status.data.error_message}
+            {status.error_message}
           </div>
         )}
       </CardContent>

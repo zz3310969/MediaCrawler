@@ -22,12 +22,12 @@ export function LoginConfig({
   onCookiesChange,
 }: LoginConfigProps) {
   // 获取配置选项
-  const { data: configOptions } = useQuery({
+  const { data: configResponse } = useQuery({
     queryKey: ['config-options'],
     queryFn: crawlerApi.getConfigOptions,
   })
 
-  const loginTypes = configOptions?.data?.login_types || []
+  const loginTypes = configResponse?.data?.login_types || []
 
   return (
     <Card className="h-full">

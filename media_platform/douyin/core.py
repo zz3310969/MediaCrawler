@@ -385,6 +385,9 @@ class DouYinCrawler(AbstractCrawler):
             crawler_type="creator",
             creator_ids=config.DY_CREATOR_ID_LIST,
         )
+        
+        # 初始化增量爬取处理器
+        self._init_incremental_handler(platform="dy", crawler_type="creator")
 
         # 从上次的创作者索引开始
         for creator_idx in range(progress.current_creator_index, len(config.DY_CREATOR_ID_LIST)):
@@ -401,20 +404,65 @@ class DouYinCrawler(AbstractCrawler):
                 continue
 
             creator_info: Dict = await self.dy_client.get_user_info(user_id)
+            creator_name = ""
             if creator_info:
                 await douyin_store.save_creator(user_id, creator=creator_info)
+                creator_name = creator_info.get("nickname", "")
 
-            # Get all video information of the creator
-            all_video_list = await self.dy_client.get_all_user_aweme_posts(sec_user_id=user_id, callback=self.fetch_creator_video_detail)
+            # Get all video information of the creator (不使用callback，先获取全部)
+            all_video_list = await self.dy_client.get_all_user_aweme_posts(
+                sec_user_id=user_id, 
+                callback=None  # 先不处理，等增量过滤后再处理
+            )
+            
+            # 🔥 增量过滤：使用早停策略过滤已存在的视频
+            if self._has_incremental_handler():
+                # 转换抖音视频格式以适配增量处理器
+                converted_videos = []
+                for video in all_video_list:
+                    converted_videos.append({
+                        'note_id': str(video.get("aweme_id", "")),
+                        'title': video.get("desc", "")[:50],
+                        'time': video.get("create_time", 0),
+                    })
+                
+                filtered_converted = await self._incremental_handler.process_creator_notes(
+                    creator_id=user_id,
+                    notes_list=converted_videos,
+                    creator_name=creator_name
+                )
+                
+                # 根据过滤结果筛选原始视频
+                filtered_video_ids = {v['note_id'] for v in filtered_converted}
+                all_video_list = [
+                    video for video in all_video_list 
+                    if str(video.get("aweme_id", "")) in filtered_video_ids
+                ]
+            
+            # 处理过滤后的视频
+            if all_video_list:
+                await self.fetch_creator_video_detail(all_video_list)
 
             video_ids = []
             for video_item in all_video_list:
                 video_id = video_item.get("aweme_id")
-                # 跳过已处理的视频
-                if progress.is_note_processed(video_id):
-                    continue
                 video_ids.append(video_id)
                 progress.mark_note_processed(video_id)
+            
+            # 🔥 更新增量元数据
+            if self._has_incremental_handler() and all_video_list:
+                latest_video = all_video_list[0]
+                latest_note = {
+                    'note_id': str(latest_video.get("aweme_id", "")),
+                    'title': latest_video.get("desc", "")[:50],
+                    'time': latest_video.get("create_time", 0),
+                }
+                await self._incremental_handler.update_metadata(
+                    creator_id=user_id,
+                    latest_note=latest_note,
+                    total_new_crawled=len(all_video_list),
+                    creator_name=creator_name
+                )
             
             await self.batch_get_note_comments(video_ids, progress)
             await self._save_progress_if_needed(progress, force=True)

@@ -18,13 +18,13 @@ export function DataManager({ open, onOpenChange }: DataManagerProps) {
   const [selectedCategory, setSelectedCategory] = useState<string>('all')
 
   // 获取数据文件列表
-  const { data: filesData, isLoading, refetch } = useQuery({
+  const { data: filesResponse, isLoading, refetch } = useQuery({
     queryKey: ['data-files'],
     queryFn: () => crawlerApi.getDataFiles(),
     enabled: open,
   })
 
-  const files = filesData?.data?.files || []
+  const files = filesResponse?.data?.files || []
 
   // 统计各类别的文件数量
   const categoryCounts: Record<string, number> = {}

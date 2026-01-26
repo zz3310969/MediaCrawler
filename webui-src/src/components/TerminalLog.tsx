@@ -34,11 +34,13 @@ export function TerminalLog() {
   const [showDataManager, setShowDataManager] = useState(false)
 
   // 查询爬虫状态
-  const { data: status } = useQuery({
+  const { data: statusResponse } = useQuery({
     queryKey: ['crawler-status'],
     queryFn: crawlerApi.getStatus,
     refetchInterval: 1000, // 每秒刷新
   })
+  
+  const status = statusResponse?.data
 
   // WebSocket 连接
   const { isConnected } = useWebSocket({
@@ -72,7 +74,7 @@ export function TerminalLog() {
       'error': { text: 'ERROR', variant: 'destructive' as const },
     }
     
-    const statusKey = status?.data?.status || 'idle'
+    const statusKey = status?.status || 'idle'
     return statusMap[statusKey] || statusMap.idle
   }
 

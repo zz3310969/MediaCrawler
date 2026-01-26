@@ -21,7 +21,7 @@ client.interceptors.request.use(
 
 // 响应拦截器
 client.interceptors.response.use(
-  (response) => response.data,
+  (response) => response,
   (error) => {
     const message = error.response?.data?.detail || error.message || '请求失败'
     console.error('API Error:', message)

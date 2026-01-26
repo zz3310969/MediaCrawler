@@ -258,6 +258,9 @@ class XiaoHongShuCrawler(AbstractCrawler):
             creator_ids=config.XHS_CREATOR_ID_LIST,
         )
         
+        # 初始化增量爬取处理器
+        self._init_incremental_handler(platform="xhs", crawler_type="creator")
+        
         # 从上次的创作者索引开始
         for creator_idx in range(progress.current_creator_index, len(config.XHS_CREATOR_ID_LIST)):
             creator_url = config.XHS_CREATOR_ID_LIST[creator_idx]
@@ -275,8 +278,10 @@ class XiaoHongShuCrawler(AbstractCrawler):
                     xsec_token=creator_info.xsec_token,
                     xsec_source=creator_info.xsec_source
                 )
+                creator_name = ""
                 if createor_info:
                     await xhs_store.save_creator(user_id, creator=createor_info)
+                    creator_name = createor_info.get("basic_info", {}).get("nickname", "")
             except ValueError as e:
                 utils.logger.error(f"[XiaoHongShuCrawler.get_creators_and_notes] Failed to parse creator URL: {e}")
                 progress.record_error(str(e))
@@ -288,23 +293,48 @@ class XiaoHongShuCrawler(AbstractCrawler):
             all_notes_list = await self.xhs_client.get_all_notes_by_creator(
                 user_id=user_id,
                 crawl_interval=crawl_interval,
-                callback=self.fetch_creator_notes_detail,
+                callback=None,  # 先不处理详情，等增量过滤后再处理
                 xsec_token=creator_info.xsec_token,
                 xsec_source=creator_info.xsec_source,
             )
-
+            
+            # 🔥 增量过滤：使用早停策略过滤已存在的笔记
+            if self._has_incremental_handler():
+                all_notes_list = await self._incremental_handler.process_creator_notes(
+                    creator_id=user_id,
+                    notes_list=all_notes_list,
+                    creator_name=creator_name
+                )
+            
+            # 如果有新笔记，处理详情
+            if all_notes_list:
+                await self.fetch_creator_notes_detail(all_notes_list)
+            
+            # 收集需要爬取评论的笔记ID
             note_ids = []
             xsec_tokens = []
             for note_item in all_notes_list:
                 note_id = note_item.get("note_id")
-                # 跳过已处理的笔记
-                if progress.is_note_processed(note_id):
+                # 跳过已处理评论的笔记
+                if progress.is_comment_note_processed(note_id):
                     continue
                 note_ids.append(note_id)
                 xsec_tokens.append(note_item.get("xsec_token"))
                 progress.mark_note_processed(note_id)
             
+            # 爬取评论
             await self.batch_get_note_comments(note_ids, xsec_tokens, progress)
+            
+            # 🔥 更新增量元数据
+            if self._has_incremental_handler() and all_notes_list:
+                latest_note = all_notes_list[0]  # 第一条是最新的
+                await self._incremental_handler.update_metadata(
+                    creator_id=user_id,
+                    latest_note=latest_note,
+                    total_new_crawled=len(all_notes_list),
+                    creator_name=creator_name
+                )
+            
             await self._save_progress_if_needed(progress, force=True)
         
         # 标记任务完成

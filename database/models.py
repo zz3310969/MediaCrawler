@@ -16,7 +16,7 @@
 # 详细许可条款请参阅项目根目录下的LICENSE文件。
 # 使用本代码即表示您同意遵守上述原则和LICENSE中的所有条款。
 
-from sqlalchemy import create_engine, Column, Integer, Text, String, BigInteger
+from sqlalchemy import create_engine, Column, Integer, Text, String, BigInteger, Index
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
@@ -472,3 +472,37 @@ class ZhihuCreator(Base):
     get_voteup_count = Column(Integer, default=0)
     add_ts = Column(BigInteger)
     last_modify_ts = Column(BigInteger)
+
+class IncrementalMetadata(Base):
+    """增量爬取元数据表 - 记录每个爬取任务的上次位置"""
+    __tablename__ = 'incremental_metadata'
+    
+    id = Column(Integer, primary_key=True)
+    platform = Column(String(64), index=True, nullable=False)           # 平台: xhs, dy, wb等
+    crawler_type = Column(String(64), index=True, nullable=False)       # 类型: search, creator, detail
+    
+    # 目标标识（根据类型不同而不同）
+    target_key = Column(String(255), index=True, nullable=False)        # 创作者ID/关键词等
+    target_value = Column(Text)                                          # 具体的值（JSON格式，可扩展）
+    
+    # ====== 创作者模式专用字段 ======
+    last_note_id = Column(String(255))                                  # 该创作者的最新笔记ID
+    last_note_time = Column(BigInteger)                                 # 该创作者的最新笔记时间
+    last_note_title = Column(Text)                                      # 该创作者的最新笔记标题（便于查看）
+    
+    # ====== 搜索模式专用字段 ======
+    last_search_time = Column(BigInteger)                               # 上次搜索获取的最新内容时间
+    processed_note_ids = Column(Text)                                   # 已处理的笔记ID列表(JSON)
+    
+    # ====== 通用字段 ======
+    last_crawl_time = Column(BigInteger)                                # 上次爬取时间戳
+    total_crawled = Column(Integer, default=0)                          # 累计爬取数量
+    incremental_enabled = Column(Integer, default=1)                    # 是否启用增量(1启用/0禁用)
+    
+    created_at = Column(BigInteger)
+    updated_at = Column(BigInteger)
+    
+    # 联合唯一索引
+    __table_args__ = (
+        Index('idx_platform_type_target', 'platform', 'crawler_type', 'target_key', unique=True),
+    )

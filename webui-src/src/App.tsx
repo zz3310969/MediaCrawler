@@ -27,11 +27,13 @@ function MainApp() {
   const { config, updateConfig, handleCrawlerTypeChange, handleLoginTypeChange } = useCrawlerConfig()
 
   // 查询爬虫状态
-  const { data: status } = useQuery({
+  const { data: statusResponse } = useQuery({
     queryKey: ['crawler-status'],
     queryFn: crawlerApi.getStatus,
     refetchInterval: QUERY_CONFIG.STATUS_REFETCH_INTERVAL,
   })
+  
+  const status = statusResponse?.data
 
   // 启动爬虫
   const startMutation = useMutation({
@@ -57,7 +59,7 @@ function MainApp() {
     },
   })
 
-  const isRunning = status?.data?.status === 'running'
+  const isRunning = status?.status === 'running'
 
   const handleStartStop = () => {
     if (isRunning) {
