@@ -117,6 +117,65 @@ FONT_PATH = "./docs/STZHONGS.TTF"
 # 爬取间隔时间
 CRAWLER_MAX_SLEEP_SEC = 2
 
+# ==================== 断点续爬配置 ====================
+# 是否启用断点续爬功能
+# 启用后，爬虫会自动保存进度，中断后可以从上次位置继续
+ENABLE_RESUME_CRAWL = True
+
+# 是否自动恢复上次未完成的任务
+# 设置为True时，启动爬虫会自动检测并恢复未完成的任务
+# 设置为False时，每次都会开始新任务
+AUTO_RESUME_LAST_TASK = True
+
+# 进度保存间隔（每处理N条数据保存一次进度）
+# 较小的值更安全但会增加IO开销
+PROGRESS_SAVE_INTERVAL = 5
+
+# 进度文件保存目录
+PROGRESS_DIR = "./crawl_progress"
+
+# 是否在任务完成后自动清理旧的进度文件
+CLEANUP_OLD_PROGRESS = True
+
+# 保留已完成任务进度文件的天数
+PROGRESS_KEEP_DAYS = 7
+
+# ==================== 多账号配置 ====================
+# 是否启用多账号模式
+# 启用后，爬虫会从账号池中轮换使用账号，提高爬取稳定性
+ENABLE_MULTI_ACCOUNT = False
+
+# 账号配置文件目录
+# 每个平台的账号配置保存在 {ACCOUNTS_DIR}/{platform}_accounts.json
+ACCOUNTS_DIR = "./accounts"
+
+# 账号轮换策略
+# round_robin: 轮询 - 按顺序依次使用每个账号
+# random: 随机 - 随机选择一个可用账号
+# least_used: 最少使用 - 优先使用请求次数最少的账号
+ACCOUNT_ROTATION_STRATEGY = "round_robin"
+
+# 账号冷却时间（分钟）
+# 当账号被限流时，进入冷却状态的时长
+ACCOUNT_COOLING_MINUTES = 30
+
+# 是否在账号被限流时自动切换到下一个账号
+AUTO_SWITCH_ON_RATE_LIMIT = True
+
+# 单个账号连续失败多少次后标记为冷却
+MAX_CONSECUTIVE_FAILURES = 3
+
+# ==================== IP代理池增强配置 ====================
+# 是否为每个账号绑定固定代理
+# 启用后，每个账号会使用其配置的专属代理IP
+ENABLE_ACCOUNT_PROXY_BINDING = False
+
+# 代理失败重试次数
+PROXY_RETRY_COUNT = 3
+
+# 代理验证超时时间（秒）
+PROXY_VALIDATE_TIMEOUT = 10
+
 from .bilibili_config import *
 from .xhs_config import *
 from .dy_config import *

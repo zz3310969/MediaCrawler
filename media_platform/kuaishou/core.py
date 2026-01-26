@@ -23,7 +23,10 @@ import os
 # import random  # Removed as we now use fixed config.CRAWLER_MAX_SLEEP_SEC intervals
 import time
 from asyncio import Task
-from typing import Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
+
+if TYPE_CHECKING:
+    from crawler.progress import CrawlProgress
 
 from playwright.async_api import (
     BrowserContext,
@@ -55,14 +58,31 @@ class KuaishouCrawler(AbstractCrawler):
     cdp_manager: Optional[CDPBrowserManager]
 
     def __init__(self):
+        super().__init__()  # 初始化断点续爬相关属性
         self.index_url = "https://www.kuaishou.com"
         self.user_agent = utils.get_user_agent()
         self.cdp_manager = None
         self.ip_proxy_pool = None  # Proxy IP pool, used for automatic proxy refresh
 
     async def start(self):
+        # 初始化进度管理器
+        self._init_progress_manager()
+        
+        # 初始化账号池
+        await self._init_account_pool("ks")
+        
         playwright_proxy_format, httpx_proxy_format = None, None
-        if config.ENABLE_IP_PROXY:
+        
+        # 优先使用多账号模式的代理配置
+        if self._has_multi_account():
+            account = await self._get_next_account()
+            if account:
+                playwright_proxy_format, httpx_proxy_format = self._get_account_proxy()
+                if playwright_proxy_format:
+                    utils.logger.info(f"[KuaishouCrawler] Using account proxy: {account.proxy_ip}")
+        
+        # 如果没有账号代理，使用全局代理池
+        if not httpx_proxy_format and config.ENABLE_IP_PROXY:
             self.ip_proxy_pool = await create_ip_pool(
                 config.IP_PROXY_POOL_COUNT, enable_validate_ip=True
             )
@@ -98,12 +118,21 @@ class KuaishouCrawler(AbstractCrawler):
             # Create a client to interact with the kuaishou website.
             self.ks_client = await self.create_ks_client(httpx_proxy_format)
             if not await self.ks_client.pong():
+                # 优先使用账号的Cookie
+                cookie_str = self._get_account_cookies() or config.COOKIES
+                login_type = config.LOGIN_TYPE
+                
+                # 如果有账号Cookie，使用cookie登录方式
+                if self._current_account and self._current_account.cookies:
+                    login_type = "cookie"
+                    utils.logger.info(f"[KuaishouCrawler] Using account cookies for login")
+                
                 login_obj = KuaishouLogin(
-                    login_type=config.LOGIN_TYPE,
+                    login_type=login_type,
                     login_phone=httpx_proxy_format,
                     browser_context=self.browser_context,
                     context_page=self.context_page,
-                    cookie_str=config.COOKIES,
+                    cookie_str=cookie_str,
                 )
                 await login_obj.begin()
                 await self.ks_client.update_cookies(
@@ -130,14 +159,30 @@ class KuaishouCrawler(AbstractCrawler):
         ks_limit_count = 20  # kuaishou limit page fixed value
         if config.CRAWLER_MAX_NOTES_COUNT < ks_limit_count:
             config.CRAWLER_MAX_NOTES_COUNT = ks_limit_count
+        
+        # 初始化或恢复进度
+        keywords_list = [kw.strip() for kw in config.KEYWORDS.split(",") if kw.strip()]
+        progress = await self._init_or_resume_progress(
+            platform="ks",
+            crawler_type="search",
+            keywords=keywords_list,
+        )
+        
         start_page = config.START_PAGE
-        for keyword in config.KEYWORDS.split(","):
+        
+        # 从上次的关键词索引开始
+        for keyword_idx in range(progress.current_keyword_index, len(keywords_list)):
+            keyword = keywords_list[keyword_idx]
+            progress.current_keyword_index = keyword_idx
             search_session_id = ""
             source_keyword_var.set(keyword)
             utils.logger.info(
                 f"[KuaishouCrawler.search] Current search keyword: {keyword}"
             )
-            page = 1
+            
+            # 从上次的页码开始
+            page = progress.current_page if keyword_idx == progress.current_keyword_index else 1
+            
             while (
                 page - start_page + 1
             ) * ks_limit_count <= config.CRAWLER_MAX_NOTES_COUNT:
@@ -148,6 +193,8 @@ class KuaishouCrawler(AbstractCrawler):
                 utils.logger.info(
                     f"[KuaishouCrawler.search] search kuaishou keyword: {keyword}, page: {page}"
                 )
+                progress.current_page = page
+                
                 video_id_list: List[str] = []
                 videos_res = await self.ks_client.search_info_by_keyword(
                     keyword=keyword,
@@ -168,8 +215,19 @@ class KuaishouCrawler(AbstractCrawler):
                     continue
                 search_session_id = vision_search_photo.get("searchSessionId", "")
                 for video_detail in vision_search_photo.get("feeds"):
-                    video_id_list.append(video_detail.get("photo", {}).get("id"))
+                    video_id = video_detail.get("photo", {}).get("id")
+                    
+                    # 跳过已处理的视频
+                    if progress.is_note_processed(video_id):
+                        utils.logger.debug(f"[KuaishouCrawler.search] Skip processed video: {video_id}")
+                        continue
+                    
+                    video_id_list.append(video_id)
                     await kuaishou_store.update_kuaishou_video(video_item=video_detail)
+                    
+                    # 标记视频已处理
+                    progress.mark_note_processed(video_id)
+                    await self._save_progress_if_needed(progress)
 
                 # batch fetch video comments
                 page += 1
@@ -178,19 +236,47 @@ class KuaishouCrawler(AbstractCrawler):
                 await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
                 utils.logger.info(f"[KuaishouCrawler.search] Sleeping for {config.CRAWLER_MAX_SLEEP_SEC} seconds after page {page-1}")
 
-                await self.batch_get_video_comments(video_id_list)
+                await self.batch_get_video_comments(video_id_list, progress)
+            
+            # 重置页码为下一个关键词
+            progress.current_page = 1
+        
+        # 标记任务完成
+        await self._mark_progress_completed(progress)
 
     async def get_specified_videos(self):
         """Get the information and comments of the specified post"""
         utils.logger.info("[KuaishouCrawler.get_specified_videos] Parsing video URLs...")
+        
+        # 先解析所有视频ID用于进度初始化
+        all_video_ids = []
+        for video_url in config.KS_SPECIFIED_ID_LIST:
+            try:
+                video_info = parse_video_info_from_url(video_url)
+                all_video_ids.append(video_info.video_id)
+            except ValueError:
+                all_video_ids.append(video_url)
+        
+        # 初始化或恢复进度
+        progress = await self._init_or_resume_progress(
+            platform="ks",
+            crawler_type="detail",
+            note_ids=all_video_ids,
+        )
+        
         video_ids = []
         for video_url in config.KS_SPECIFIED_ID_LIST:
             try:
                 video_info = parse_video_info_from_url(video_url)
+                # 跳过已处理的视频
+                if progress.is_note_processed(video_info.video_id):
+                    utils.logger.debug(f"[KuaishouCrawler.get_specified_videos] Skip processed video: {video_info.video_id}")
+                    continue
                 video_ids.append(video_info.video_id)
                 utils.logger.info(f"Parsed video ID: {video_info.video_id} from {video_url}")
             except ValueError as e:
                 utils.logger.error(f"Failed to parse video URL: {e}")
+                progress.record_error(str(e))
                 continue
 
         semaphore = asyncio.Semaphore(config.MAX_CONCURRENCY_NUM)
@@ -201,8 +287,17 @@ class KuaishouCrawler(AbstractCrawler):
         video_details = await asyncio.gather(*task_list)
         for video_detail in video_details:
             if video_detail is not None:
+                video_id = video_detail.get("photo", {}).get("id", "")
                 await kuaishou_store.update_kuaishou_video(video_detail)
-        await self.batch_get_video_comments(video_ids)
+                
+                # 标记视频已处理
+                progress.mark_note_processed(video_id)
+                await self._save_progress_if_needed(progress)
+        
+        await self.batch_get_video_comments(video_ids, progress)
+        
+        # 标记任务完成
+        await self._mark_progress_completed(progress)
 
     async def get_video_info_task(
         self, video_id: str, semaphore: asyncio.Semaphore
@@ -231,10 +326,11 @@ class KuaishouCrawler(AbstractCrawler):
                 )
                 return None
 
-    async def batch_get_video_comments(self, video_id_list: List[str]):
+    async def batch_get_video_comments(self, video_id_list: List[str], progress: Optional["CrawlProgress"] = None):
         """
         batch get video comments
         :param video_id_list:
+        :param progress:
         :return:
         """
         if not config.ENABLE_GET_COMMENTS:
@@ -243,6 +339,10 @@ class KuaishouCrawler(AbstractCrawler):
             )
             return
 
+        # 过滤已处理评论的视频
+        if progress:
+            video_id_list = [vid for vid in video_id_list if not progress.is_comment_note_processed(vid)]
+
         utils.logger.info(
             f"[KuaishouCrawler.batch_get_video_comments] video ids:{video_id_list}"
         )
@@ -250,18 +350,19 @@ class KuaishouCrawler(AbstractCrawler):
         task_list: List[Task] = []
         for video_id in video_id_list:
             task = asyncio.create_task(
-                self.get_comments(video_id, semaphore), name=video_id
+                self.get_comments(video_id, semaphore, progress), name=video_id
             )
             task_list.append(task)
 
         comment_tasks_var.set(task_list)
         await asyncio.gather(*task_list)
 
-    async def get_comments(self, video_id: str, semaphore: asyncio.Semaphore):
+    async def get_comments(self, video_id: str, semaphore: asyncio.Semaphore, progress: Optional["CrawlProgress"] = None):
         """
         get comment for video id
         :param video_id:
         :param semaphore:
+        :param progress:
         :return:
         """
         async with semaphore:
@@ -280,6 +381,13 @@ class KuaishouCrawler(AbstractCrawler):
                     callback=kuaishou_store.batch_update_ks_video_comments,
                     max_count=config.CRAWLER_MAX_COMMENTS_COUNT_SINGLENOTES,
                 )
+                
+                # 标记评论已处理
+                if progress:
+                    progress.mark_comment_note_processed(video_id)
+                    progress.total_comments_crawled += 1
+                    await self._save_progress_if_needed(progress)
+                    
             except DataFetchError as ex:
                 utils.logger.error(
                     f"[KuaishouCrawler.get_comments] get video_id: {video_id} comment error: {ex}"
@@ -394,7 +502,19 @@ class KuaishouCrawler(AbstractCrawler):
         utils.logger.info(
             "[KuaiShouCrawler.get_creators_and_videos] Begin get kuaishou creators"
         )
-        for creator_url in config.KS_CREATOR_ID_LIST:
+        
+        # 初始化或恢复进度
+        progress = await self._init_or_resume_progress(
+            platform="ks",
+            crawler_type="creator",
+            creator_ids=config.KS_CREATOR_ID_LIST,
+        )
+        
+        # 从上次的创作者索引开始
+        for creator_idx in range(progress.current_creator_index, len(config.KS_CREATOR_ID_LIST)):
+            creator_url = config.KS_CREATOR_ID_LIST[creator_idx]
+            progress.current_creator_index = creator_idx
+            
             try:
                 # Parse creator URL to get user_id
                 creator_info: CreatorUrlInfo = parse_creator_info_from_url(creator_url)
@@ -407,6 +527,7 @@ class KuaishouCrawler(AbstractCrawler):
                     await kuaishou_store.save_creator(user_id, creator=createor_info)
             except ValueError as e:
                 utils.logger.error(f"[KuaiShouCrawler.get_creators_and_videos] Failed to parse creator URL: {e}")
+                progress.record_error(str(e))
                 continue
 
             # Get all video information of the creator
@@ -416,10 +537,20 @@ class KuaishouCrawler(AbstractCrawler):
                 callback=self.fetch_creator_video_detail,
             )
 
-            video_ids = [
-                video_item.get("photo", {}).get("id") for video_item in all_video_list
-            ]
-            await self.batch_get_video_comments(video_ids)
+            video_ids = []
+            for video_item in all_video_list:
+                video_id = video_item.get("photo", {}).get("id")
+                # 跳过已处理的视频
+                if progress.is_note_processed(video_id):
+                    continue
+                video_ids.append(video_id)
+                progress.mark_note_processed(video_id)
+            
+            await self.batch_get_video_comments(video_ids, progress)
+            await self._save_progress_if_needed(progress, force=True)
+        
+        # 标记任务完成
+        await self._mark_progress_completed(progress)
 
     async def fetch_creator_video_detail(self, video_list: List[Dict]):
         """
@@ -438,6 +569,12 @@ class KuaishouCrawler(AbstractCrawler):
 
     async def close(self):
         """Close browser context"""
+        # 保存进度
+        await self._save_progress_on_close()
+        
+        # 保存账号池状态
+        await self._save_account_pool_on_close()
+        
         # If using CDP mode, need special handling
         if self.cdp_manager:
             await self.cdp_manager.cleanup()

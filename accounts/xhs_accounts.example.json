@@ -1,0 +1,74 @@
+{
+  "platform": "xhs",
+  "updated_at": "2026-01-26T00:00:00",
+  "accounts": [
+    {
+      "account_id": "xhs_account_001",
+      "platform": "xhs",
+      "name": "小红书账号1",
+      "cookies": "web_session=your_session_cookie_here",
+      "cookie_dict": {
+        "web_session": "your_session_cookie_here"
+      },
+      "browser_data_dir": "",
+      "proxy_ip": "192.168.1.100",
+      "proxy_port": 8080,
+      "proxy_user": "proxy_user",
+      "proxy_password": "proxy_password",
+      "status": "active",
+      "last_used_at": "",
+      "created_at": "2026-01-26T00:00:00",
+      "total_requests": 0,
+      "success_requests": 0,
+      "failed_requests": 0,
+      "cooling_until": "",
+      "cooling_count": 0,
+      "last_error": ""
+    },
+    {
+      "account_id": "xhs_account_002",
+      "platform": "xhs",
+      "name": "小红书账号2 (无代理)",
+      "cookies": "web_session=another_session_cookie",
+      "cookie_dict": {
+        "web_session": "another_session_cookie"
+      },
+      "browser_data_dir": "",
+      "proxy_ip": "",
+      "proxy_port": 0,
+      "proxy_user": "",
+      "proxy_password": "",
+      "status": "active",
+      "last_used_at": "",
+      "created_at": "2026-01-26T00:00:00",
+      "total_requests": 0,
+      "success_requests": 0,
+      "failed_requests": 0,
+      "cooling_until": "",
+      "cooling_count": 0,
+      "last_error": ""
+    },
+    {
+      "account_id": "xhs_account_003",
+      "platform": "xhs",
+      "name": "小红书账号3 (浏览器数据目录)",
+      "cookies": "",
+      "cookie_dict": {},
+      "browser_data_dir": "./browser_data/xhs_user_data_dir_account3",
+      "proxy_ip": "",
+      "proxy_port": 0,
+      "proxy_user": "",
+      "proxy_password": "",
+      "status": "unused",
+      "last_used_at": "",
+      "created_at": "2026-01-26T00:00:00",
+      "total_requests": 0,
+      "success_requests": 0,
+      "failed_requests": 0,
+      "cooling_until": "",
+      "cooling_count": 0,
+      "last_error": ""
+    }
+  ]
+}
+

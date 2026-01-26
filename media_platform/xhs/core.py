@@ -21,7 +21,10 @@ import asyncio
 import os
 import random
 from asyncio import Task
-from typing import Dict, List, Optional
+from typing import TYPE_CHECKING, Dict, List, Optional
+
+if TYPE_CHECKING:
+    from crawler.progress import CrawlProgress
 
 from playwright.async_api import (
     BrowserContext,
@@ -55,6 +58,7 @@ class XiaoHongShuCrawler(AbstractCrawler):
     cdp_manager: Optional[CDPBrowserManager]
 
     def __init__(self) -> None:
+        super().__init__()  # 初始化断点续爬相关属性
         self.index_url = "https://www.xiaohongshu.com"
         # self.user_agent = utils.get_user_agent()
         self.user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
@@ -62,8 +66,24 @@ class XiaoHongShuCrawler(AbstractCrawler):
         self.ip_proxy_pool = None  # Proxy IP pool for automatic proxy refresh
 
     async def start(self) -> None:
+        # 初始化进度管理器
+        self._init_progress_manager()
+        
+        # 初始化账号池
+        await self._init_account_pool("xhs")
+        
         playwright_proxy_format, httpx_proxy_format = None, None
-        if config.ENABLE_IP_PROXY:
+        
+        # 优先使用多账号模式的代理配置
+        if self._has_multi_account():
+            account = await self._get_next_account()
+            if account:
+                playwright_proxy_format, httpx_proxy_format = self._get_account_proxy()
+                if playwright_proxy_format:
+                    utils.logger.info(f"[XiaoHongShuCrawler] Using account proxy: {account.proxy_ip}")
+        
+        # 如果没有账号代理，使用全局代理池
+        if not httpx_proxy_format and config.ENABLE_IP_PROXY:
             self.ip_proxy_pool = await create_ip_pool(config.IP_PROXY_POOL_COUNT, enable_validate_ip=True)
             ip_proxy_info: IpInfoModel = await self.ip_proxy_pool.get_proxy()
             playwright_proxy_format, httpx_proxy_format = utils.format_proxy_info(ip_proxy_info)
@@ -97,12 +117,21 @@ class XiaoHongShuCrawler(AbstractCrawler):
             # Create a client to interact with the Xiaohongshu website.
             self.xhs_client = await self.create_xhs_client(httpx_proxy_format)
             if not await self.xhs_client.pong():
+                # 优先使用账号的Cookie
+                cookie_str = self._get_account_cookies() or config.COOKIES
+                login_type = config.LOGIN_TYPE
+                
+                # 如果有账号Cookie，使用cookie登录方式
+                if self._current_account and self._current_account.cookies:
+                    login_type = "cookie"
+                    utils.logger.info(f"[XiaoHongShuCrawler] Using account cookies for login")
+                
                 login_obj = XiaoHongShuLogin(
-                    login_type=config.LOGIN_TYPE,
+                    login_type=login_type,
                     login_phone="",  # input your phone number
                     browser_context=self.browser_context,
                     context_page=self.context_page,
-                    cookie_str=config.COOKIES,
+                    cookie_str=cookie_str,
                 )
                 await login_obj.begin()
                 await self.xhs_client.update_cookies(browser_context=self.browser_context)
@@ -128,12 +157,28 @@ class XiaoHongShuCrawler(AbstractCrawler):
         xhs_limit_count = 20  # Xiaohongshu limit page fixed value
         if config.CRAWLER_MAX_NOTES_COUNT < xhs_limit_count:
             config.CRAWLER_MAX_NOTES_COUNT = xhs_limit_count
+        
+        # 初始化或恢复进度
+        keywords_list = [kw.strip() for kw in config.KEYWORDS.split(",") if kw.strip()]
+        progress = await self._init_or_resume_progress(
+            platform="xhs",
+            crawler_type="search",
+            keywords=keywords_list,
+        )
+        
         start_page = config.START_PAGE
-        for keyword in config.KEYWORDS.split(","):
+        
+        # 从上次的关键词索引开始
+        for keyword_idx in range(progress.current_keyword_index, len(keywords_list)):
+            keyword = keywords_list[keyword_idx]
+            progress.current_keyword_index = keyword_idx
             source_keyword_var.set(keyword)
             utils.logger.info(f"[XiaoHongShuCrawler.search] Current search keyword: {keyword}")
-            page = 1
+            
+            # 从上次的页码开始（如果是恢复的任务）
+            page = progress.current_page if keyword_idx == progress.current_keyword_index else 1
             search_id = get_search_id()
+            
             while (page - start_page + 1) * xhs_limit_count <= config.CRAWLER_MAX_NOTES_COUNT:
                 if page < start_page:
                     utils.logger.info(f"[XiaoHongShuCrawler.search] Skip page {page}")
@@ -142,6 +187,8 @@ class XiaoHongShuCrawler(AbstractCrawler):
 
                 try:
                     utils.logger.info(f"[XiaoHongShuCrawler.search] search Xiaohongshu keyword: {keyword}, page: {page}")
+                    progress.current_page = page
+                    
                     note_ids: List[str] = []
                     xsec_tokens: List[str] = []
                     notes_res = await self.xhs_client.get_note_by_keyword(
@@ -166,25 +213,56 @@ class XiaoHongShuCrawler(AbstractCrawler):
                     note_details = await asyncio.gather(*task_list)
                     for note_detail in note_details:
                         if note_detail:
+                            note_id = note_detail.get("note_id")
+                            # 跳过已处理的笔记
+                            if progress.is_note_processed(note_id):
+                                utils.logger.debug(f"[XiaoHongShuCrawler.search] Skip processed note: {note_id}")
+                                continue
+                            
                             await xhs_store.update_xhs_note(note_detail)
                             await self.get_notice_media(note_detail)
-                            note_ids.append(note_detail.get("note_id"))
+                            note_ids.append(note_id)
                             xsec_tokens.append(note_detail.get("xsec_token"))
+                            
+                            # 标记笔记已处理并保存进度
+                            progress.mark_note_processed(note_id)
+                            await self._save_progress_if_needed(progress)
+                    
                     page += 1
                     utils.logger.info(f"[XiaoHongShuCrawler.search] Note details: {note_details}")
-                    await self.batch_get_note_comments(note_ids, xsec_tokens)
+                    await self.batch_get_note_comments(note_ids, xsec_tokens, progress)
 
                     # Sleep after each page navigation
                     await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
                     utils.logger.info(f"[XiaoHongShuCrawler.search] Sleeping for {config.CRAWLER_MAX_SLEEP_SEC} seconds after page {page-1}")
-                except DataFetchError:
+                except DataFetchError as e:
                     utils.logger.error("[XiaoHongShuCrawler.search] Get note detail error")
+                    progress.record_error(str(e))
+                    await self._save_progress_if_needed(progress, force=True)
                     break
+            
+            # 重置页码为下一个关键词
+            progress.current_page = 1
+        
+        # 标记任务完成
+        await self._mark_progress_completed(progress)
 
     async def get_creators_and_notes(self) -> None:
         """Get creator's notes and retrieve their comment information."""
         utils.logger.info("[XiaoHongShuCrawler.get_creators_and_notes] Begin get Xiaohongshu creators")
-        for creator_url in config.XHS_CREATOR_ID_LIST:
+        
+        # 初始化或恢复进度
+        progress = await self._init_or_resume_progress(
+            platform="xhs",
+            crawler_type="creator",
+            creator_ids=config.XHS_CREATOR_ID_LIST,
+        )
+        
+        # 从上次的创作者索引开始
+        for creator_idx in range(progress.current_creator_index, len(config.XHS_CREATOR_ID_LIST)):
+            creator_url = config.XHS_CREATOR_ID_LIST[creator_idx]
+            progress.current_creator_index = creator_idx
+            
             try:
                 # Parse creator URL to get user_id and security tokens
                 creator_info: CreatorUrlInfo = parse_creator_info_from_url(creator_url)
@@ -201,6 +279,7 @@ class XiaoHongShuCrawler(AbstractCrawler):
                     await xhs_store.save_creator(user_id, creator=createor_info)
             except ValueError as e:
                 utils.logger.error(f"[XiaoHongShuCrawler.get_creators_and_notes] Failed to parse creator URL: {e}")
+                progress.record_error(str(e))
                 continue
 
             # Use fixed crawling interval
@@ -217,9 +296,19 @@ class XiaoHongShuCrawler(AbstractCrawler):
             note_ids = []
             xsec_tokens = []
             for note_item in all_notes_list:
-                note_ids.append(note_item.get("note_id"))
+                note_id = note_item.get("note_id")
+                # 跳过已处理的笔记
+                if progress.is_note_processed(note_id):
+                    continue
+                note_ids.append(note_id)
                 xsec_tokens.append(note_item.get("xsec_token"))
-            await self.batch_get_note_comments(note_ids, xsec_tokens)
+                progress.mark_note_processed(note_id)
+            
+            await self.batch_get_note_comments(note_ids, xsec_tokens, progress)
+            await self._save_progress_if_needed(progress, force=True)
+        
+        # 标记任务完成
+        await self._mark_progress_completed(progress)
 
     async def fetch_creator_notes_detail(self, note_list: List[Dict]):
         """Concurrently obtain the specified post list and save the data"""
@@ -244,9 +333,22 @@ class XiaoHongShuCrawler(AbstractCrawler):
 
         Note: Must specify note_id, xsec_source, xsec_token
         """
+        # 初始化或恢复进度
+        note_ids_list = [parse_note_info_from_note_url(url).note_id for url in config.XHS_SPECIFIED_NOTE_URL_LIST]
+        progress = await self._init_or_resume_progress(
+            platform="xhs",
+            crawler_type="detail",
+            note_ids=note_ids_list,
+        )
+        
         get_note_detail_task_list = []
         for full_note_url in config.XHS_SPECIFIED_NOTE_URL_LIST:
             note_url_info: NoteUrlInfo = parse_note_info_from_note_url(full_note_url)
+            # 跳过已处理的笔记
+            if progress.is_note_processed(note_url_info.note_id):
+                utils.logger.debug(f"[XiaoHongShuCrawler.get_specified_notes] Skip processed note: {note_url_info.note_id}")
+                continue
+            
             utils.logger.info(f"[XiaoHongShuCrawler.get_specified_notes] Parse note url info: {note_url_info}")
             crawler_task = self.get_note_detail_async_task(
                 note_id=note_url_info.note_id,
@@ -261,11 +363,20 @@ class XiaoHongShuCrawler(AbstractCrawler):
         note_details = await asyncio.gather(*get_note_detail_task_list)
         for note_detail in note_details:
             if note_detail:
-                need_get_comment_note_ids.append(note_detail.get("note_id", ""))
+                note_id = note_detail.get("note_id", "")
+                need_get_comment_note_ids.append(note_id)
                 xsec_tokens.append(note_detail.get("xsec_token", ""))
                 await xhs_store.update_xhs_note(note_detail)
                 await self.get_notice_media(note_detail)
-        await self.batch_get_note_comments(need_get_comment_note_ids, xsec_tokens)
+                
+                # 标记笔记已处理
+                progress.mark_note_processed(note_id)
+                await self._save_progress_if_needed(progress)
+        
+        await self.batch_get_note_comments(need_get_comment_note_ids, xsec_tokens, progress)
+        
+        # 标记任务完成
+        await self._mark_progress_completed(progress)
 
     async def get_note_detail_async_task(
         self,
@@ -315,24 +426,35 @@ class XiaoHongShuCrawler(AbstractCrawler):
                 utils.logger.error(f"[XiaoHongShuCrawler.get_note_detail_async_task] have not fund note detail note_id:{note_id}, err: {ex}")
                 return None
 
-    async def batch_get_note_comments(self, note_list: List[str], xsec_tokens: List[str]):
+    async def batch_get_note_comments(self, note_list: List[str], xsec_tokens: List[str], progress: Optional["CrawlProgress"] = None):
         """Batch get note comments"""
         if not config.ENABLE_GET_COMMENTS:
             utils.logger.info(f"[XiaoHongShuCrawler.batch_get_note_comments] Crawling comment mode is not enabled")
             return
+
+        # 过滤已处理评论的笔记
+        if progress:
+            filtered_notes = []
+            filtered_tokens = []
+            for i, note_id in enumerate(note_list):
+                if not progress.is_comment_note_processed(note_id):
+                    filtered_notes.append(note_id)
+                    filtered_tokens.append(xsec_tokens[i])
+            note_list = filtered_notes
+            xsec_tokens = filtered_tokens
 
         utils.logger.info(f"[XiaoHongShuCrawler.batch_get_note_comments] Begin batch get note comments, note list: {note_list}")
         semaphore = asyncio.Semaphore(config.MAX_CONCURRENCY_NUM)
         task_list: List[Task] = []
         for index, note_id in enumerate(note_list):
             task = asyncio.create_task(
-                self.get_comments(note_id=note_id, xsec_token=xsec_tokens[index], semaphore=semaphore),
+                self.get_comments(note_id=note_id, xsec_token=xsec_tokens[index], semaphore=semaphore, progress=progress),
                 name=note_id,
             )
             task_list.append(task)
         await asyncio.gather(*task_list)
 
-    async def get_comments(self, note_id: str, xsec_token: str, semaphore: asyncio.Semaphore):
+    async def get_comments(self, note_id: str, xsec_token: str, semaphore: asyncio.Semaphore, progress: Optional["CrawlProgress"] = None):
         """Get note comments with keyword filtering and quantity limitation"""
         async with semaphore:
             utils.logger.info(f"[XiaoHongShuCrawler.get_comments] Begin get note id comments {note_id}")
@@ -345,6 +467,12 @@ class XiaoHongShuCrawler(AbstractCrawler):
                 callback=xhs_store.batch_update_xhs_note_comments,
                 max_count=config.CRAWLER_MAX_COMMENTS_COUNT_SINGLENOTES,
             )
+
+            # 标记评论已处理
+            if progress:
+                progress.mark_comment_note_processed(note_id)
+                progress.total_comments_crawled += 1
+                await self._save_progress_if_needed(progress)
 
             # Sleep after fetching comments
             await asyncio.sleep(crawl_interval)
@@ -441,6 +569,12 @@ class XiaoHongShuCrawler(AbstractCrawler):
 
     async def close(self):
         """Close browser context"""
+        # 保存进度
+        await self._save_progress_on_close()
+        
+        # 保存账号池状态
+        await self._save_account_pool_on_close()
+        
         # Special handling if using CDP mode
         if self.cdp_manager:
             await self.cdp_manager.cleanup()

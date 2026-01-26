@@ -1,0 +1,4 @@
+# 忽略实际的账号配置文件，只保留示例文件
+*_accounts.json
+!*_accounts.example.json
+

@@ -38,6 +38,7 @@ from playwright.async_api import (
 
 import config
 from base.base_crawler import AbstractCrawler
+from crawler.progress import CrawlProgress, CrawlStatus
 from proxy.proxy_ip_pool import IpInfoModel, create_ip_pool
 from store import weibo as weibo_store
 from tools import utils
@@ -58,6 +59,7 @@ class WeiboCrawler(AbstractCrawler):
     cdp_manager: Optional[CDPBrowserManager]
 
     def __init__(self):
+        super().__init__()  # 调用父类初始化，设置断点续爬相关属性
         self.index_url = "https://www.weibo.com"
         self.mobile_index_url = "https://m.weibo.cn"
         self.user_agent = utils.get_user_agent()
@@ -66,8 +68,24 @@ class WeiboCrawler(AbstractCrawler):
         self.ip_proxy_pool = None  # Proxy IP pool for automatic proxy refresh
 
     async def start(self):
+        # 初始化进度管理器（使用父类方法）
+        self._init_progress_manager()
+        
+        # 初始化账号池
+        await self._init_account_pool("wb")
+        
         playwright_proxy_format, httpx_proxy_format = None, None
-        if config.ENABLE_IP_PROXY:
+        
+        # 优先使用多账号模式的代理配置
+        if self._has_multi_account():
+            account = await self._get_next_account()
+            if account:
+                playwright_proxy_format, httpx_proxy_format = self._get_account_proxy()
+                if playwright_proxy_format:
+                    utils.logger.info(f"[WeiboCrawler] Using account proxy: {account.proxy_ip}")
+        
+        # 如果没有账号代理，使用全局代理池
+        if not httpx_proxy_format and config.ENABLE_IP_PROXY:
             self.ip_proxy_pool = await create_ip_pool(config.IP_PROXY_POOL_COUNT, enable_validate_ip=True)
             ip_proxy_info: IpInfoModel = await self.ip_proxy_pool.get_proxy()
             playwright_proxy_format, httpx_proxy_format = utils.format_proxy_info(ip_proxy_info)
@@ -97,15 +115,24 @@ class WeiboCrawler(AbstractCrawler):
             await asyncio.sleep(2)
 
 
-            # Create a client to interact with the xiaohongshu website.
+            # Create a client to interact with the weibo website.
             self.wb_client = await self.create_weibo_client(httpx_proxy_format)
             if not await self.wb_client.pong():
+                # 优先使用账号的Cookie
+                cookie_str = self._get_account_cookies() or config.COOKIES
+                login_type = config.LOGIN_TYPE
+                
+                # 如果有账号Cookie，使用cookie登录方式
+                if self._current_account and self._current_account.cookies:
+                    login_type = "cookie"
+                    utils.logger.info(f"[WeiboCrawler] Using account cookies for login")
+                
                 login_obj = WeiboLogin(
-                    login_type=config.LOGIN_TYPE,
+                    login_type=login_type,
                     login_phone="",  # your phone number
                     browser_context=self.browser_context,
                     context_page=self.context_page,
-                    cookie_str=config.COOKIES,
+                    cookie_str=cookie_str,
                 )
                 await login_obj.begin()
 
@@ -138,14 +165,13 @@ class WeiboCrawler(AbstractCrawler):
 
     async def search(self):
         """
-        search weibo note with keywords
+        search weibo note with keywords - 支持断点续爬
         :return:
         """
         utils.logger.info("[WeiboCrawler.search] Begin search weibo keywords")
         weibo_limit_count = 10  # weibo limit page fixed value
         if config.CRAWLER_MAX_NOTES_COUNT < weibo_limit_count:
             config.CRAWLER_MAX_NOTES_COUNT = weibo_limit_count
-        start_page = config.START_PAGE
 
         # Set the search type based on the configuration for weibo
         if config.WEIBO_SEARCH_TYPE == "default":
@@ -160,49 +186,137 @@ class WeiboCrawler(AbstractCrawler):
             utils.logger.error(f"[WeiboCrawler.search] Invalid WEIBO_SEARCH_TYPE: {config.WEIBO_SEARCH_TYPE}")
             return
 
-        for keyword in config.KEYWORDS.split(","):
-            source_keyword_var.set(keyword)
-            utils.logger.info(f"[WeiboCrawler.search] Current search keyword: {keyword}")
-            page = 1
-            while (page - start_page + 1) * weibo_limit_count <= config.CRAWLER_MAX_NOTES_COUNT:
-                if page < start_page:
-                    utils.logger.info(f"[WeiboCrawler.search] Skip page: {page}")
+        # 初始化或恢复进度（使用父类方法）
+        progress = await self._init_or_resume_progress(
+            platform="wb",
+            crawler_type="search",
+            keywords=[kw.strip() for kw in config.KEYWORDS.split(",") if kw.strip()]
+        )
+        
+        # 从进度中获取起始位置
+        start_keyword_index = progress.current_keyword_index
+        keywords = progress.keywords
+        
+        utils.logger.info(f"[WeiboCrawler.search] Starting from keyword index {start_keyword_index}, page {progress.current_page}")
+        utils.logger.info(f"[WeiboCrawler.search] Already processed {len(progress.processed_note_ids)} notes")
+
+        try:
+            for keyword_idx in range(start_keyword_index, len(keywords)):
+                keyword = keywords[keyword_idx]
+                source_keyword_var.set(keyword)
+                progress.current_keyword_index = keyword_idx
+                
+                utils.logger.info(f"[WeiboCrawler.search] Current search keyword: {keyword} ({keyword_idx + 1}/{len(keywords)})")
+                
+                # 确定起始页：如果是恢复的关键词，使用保存的页码；否则从配置的起始页开始
+                start_page = progress.current_page if keyword_idx == start_keyword_index else config.START_PAGE
+                page = start_page
+                
+                while (page - config.START_PAGE + 1) * weibo_limit_count <= config.CRAWLER_MAX_NOTES_COUNT:
+                    utils.logger.info(f"[WeiboCrawler.search] search weibo keyword: {keyword}, page: {page}")
+                    
+                    try:
+                        search_res = await self.wb_client.get_note_by_keyword(keyword=keyword, page=page, search_type=search_type)
+                    except Exception as e:
+                        utils.logger.error(f"[WeiboCrawler.search] Error fetching page {page}: {e}")
+                        progress.record_error(str(e))
+                        await self._save_progress_if_needed(progress, force=True)
+                        raise
+                    
+                    note_id_list: List[str] = []
+                    note_list = filter_search_result_card(search_res.get("cards"))
+                    
+                    # If full text fetching is enabled, batch get full text of posts
+                    note_list = await self.batch_get_notes_full_text(note_list)
+                    
+                    for note_item in note_list:
+                        if note_item:
+                            mblog: Dict = note_item.get("mblog")
+                            if mblog:
+                                note_id = mblog.get("id")
+                                
+                                # 跳过已处理的帖子（断点续爬去重）
+                                if progress.is_note_processed(note_id):
+                                    utils.logger.debug(f"[WeiboCrawler.search] Skip already processed note: {note_id}")
+                                    continue
+                                
+                                note_id_list.append(note_id)
+                                await weibo_store.update_weibo_note(note_item)
+                                await self.get_note_images(mblog)
+                                
+                                # 标记帖子为已处理
+                                progress.mark_note_processed(note_id)
+                    
+                    # 更新进度中的当前页码
+                    progress.current_page = page + 1
+                    
+                    # 定期保存进度
+                    await self._save_progress_if_needed(progress)
+
                     page += 1
-                    continue
-                utils.logger.info(f"[WeiboCrawler.search] search weibo keyword: {keyword}, page: {page}")
-                search_res = await self.wb_client.get_note_by_keyword(keyword=keyword, page=page, search_type=search_type)
-                note_id_list: List[str] = []
-                note_list = filter_search_result_card(search_res.get("cards"))
-                # If full text fetching is enabled, batch get full text of posts
-                note_list = await self.batch_get_notes_full_text(note_list)
-                for note_item in note_list:
-                    if note_item:
-                        mblog: Dict = note_item.get("mblog")
-                        if mblog:
-                            note_id_list.append(mblog.get("id"))
-                            await weibo_store.update_weibo_note(note_item)
-                            await self.get_note_images(mblog)
 
-                page += 1
+                    # Sleep after page navigation
+                    await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
+                    utils.logger.info(f"[WeiboCrawler.search] Sleeping for {config.CRAWLER_MAX_SLEEP_SEC} seconds after page {page-1}")
 
-                # Sleep after page navigation
-                await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
-                utils.logger.info(f"[WeiboCrawler.search] Sleeping for {config.CRAWLER_MAX_SLEEP_SEC} seconds after page {page-1}")
-
-                await self.batch_get_notes_comments(note_id_list)
+                    # 获取评论（跳过已处理评论的帖子）
+                    await self.batch_get_notes_comments(note_id_list, progress)
+                
+                # 当前关键词处理完成，重置页码
+                progress.current_page = config.START_PAGE
+                await self._save_progress_if_needed(progress, force=True)
+            
+            # 所有关键词处理完成
+            await self._mark_progress_completed(progress)
+            
+        except Exception as e:
+            # 发生异常时保存进度
+            utils.logger.error(f"[WeiboCrawler.search] Error during crawling: {e}")
+            progress.record_error(str(e))
+            await self._save_progress_if_needed(progress, force=True)
+            raise
 
     async def get_specified_notes(self):
         """
-        get specified notes info
+        get specified notes info - 支持断点续爬
         :return:
         """
-        semaphore = asyncio.Semaphore(config.MAX_CONCURRENCY_NUM)
-        task_list = [self.get_note_info_task(note_id=note_id, semaphore=semaphore) for note_id in config.WEIBO_SPECIFIED_ID_LIST]
-        video_details = await asyncio.gather(*task_list)
-        for note_item in video_details:
-            if note_item:
-                await weibo_store.update_weibo_note(note_item)
-        await self.batch_get_notes_comments(config.WEIBO_SPECIFIED_ID_LIST)
+        # 初始化或恢复进度（使用父类方法）
+        progress = await self._init_or_resume_progress(
+            platform="wb",
+            crawler_type="detail",
+            note_ids=list(config.WEIBO_SPECIFIED_ID_LIST)
+        )
+        
+        # 过滤掉已处理的帖子
+        remaining_note_ids = [
+            note_id for note_id in config.WEIBO_SPECIFIED_ID_LIST
+            if not progress.is_note_processed(note_id)
+        ]
+        
+        utils.logger.info(f"[WeiboCrawler.get_specified_notes] {len(remaining_note_ids)} notes to process, {len(progress.processed_note_ids)} already done")
+        
+        try:
+            semaphore = asyncio.Semaphore(config.MAX_CONCURRENCY_NUM)
+            task_list = [self.get_note_info_task(note_id=note_id, semaphore=semaphore) for note_id in remaining_note_ids]
+            video_details = await asyncio.gather(*task_list)
+            
+            for note_id, note_item in zip(remaining_note_ids, video_details):
+                if note_item:
+                    await weibo_store.update_weibo_note(note_item)
+                    progress.mark_note_processed(note_id)
+                    await self._save_progress_if_needed(progress)
+            
+            await self.batch_get_notes_comments(remaining_note_ids, progress)
+            
+            # 标记完成
+            await self._mark_progress_completed(progress)
+            
+        except Exception as e:
+            utils.logger.error(f"[WeiboCrawler.get_specified_notes] Error: {e}")
+            progress.record_error(str(e))
+            await self._save_progress_if_needed(progress, force=True)
+            raise
 
     async def get_note_info_task(self, note_id: str, semaphore: asyncio.Semaphore) -> Optional[Dict]:
         """
@@ -227,29 +341,45 @@ class WeiboCrawler(AbstractCrawler):
                 utils.logger.error(f"[WeiboCrawler.get_note_info_task] have not fund note detail note_id:{note_id}, err: {ex}")
                 return None
 
-    async def batch_get_notes_comments(self, note_id_list: List[str]):
+    async def batch_get_notes_comments(self, note_id_list: List[str], progress: Optional[CrawlProgress] = None):
         """
-        batch get notes comments
-        :param note_id_list:
+        batch get notes comments - 支持断点续爬
+        :param note_id_list: 帖子ID列表
+        :param progress: 进度对象（可选）
         :return:
         """
         if not config.ENABLE_GET_COMMENTS:
             utils.logger.info(f"[WeiboCrawler.batch_get_note_comments] Crawling comment mode is not enabled")
             return
 
+        # 过滤掉已处理评论的帖子
+        if progress:
+            filtered_note_ids = [
+                note_id for note_id in note_id_list 
+                if not progress.is_comment_note_processed(note_id)
+            ]
+            skipped_count = len(note_id_list) - len(filtered_note_ids)
+            if skipped_count > 0:
+                utils.logger.info(f"[WeiboCrawler.batch_get_notes_comments] Skipped {skipped_count} already processed comment notes")
+            note_id_list = filtered_note_ids
+
+        if not note_id_list:
+            return
+
         utils.logger.info(f"[WeiboCrawler.batch_get_notes_comments] note ids:{note_id_list}")
         semaphore = asyncio.Semaphore(config.MAX_CONCURRENCY_NUM)
         task_list: List[Task] = []
         for note_id in note_id_list:
-            task = asyncio.create_task(self.get_note_comments(note_id, semaphore), name=note_id)
+            task = asyncio.create_task(self.get_note_comments(note_id, semaphore, progress), name=note_id)
             task_list.append(task)
         await asyncio.gather(*task_list)
 
-    async def get_note_comments(self, note_id: str, semaphore: asyncio.Semaphore):
+    async def get_note_comments(self, note_id: str, semaphore: asyncio.Semaphore, progress: Optional[CrawlProgress] = None):
         """
-        get comment for note id
-        :param note_id:
-        :param semaphore:
+        get comment for note id - 支持断点续爬
+        :param note_id: 帖子ID
+        :param semaphore: 并发信号量
+        :param progress: 进度对象（可选）
         :return:
         """
         async with semaphore:
@@ -266,6 +396,12 @@ class WeiboCrawler(AbstractCrawler):
                     callback=weibo_store.batch_update_weibo_note_comments,
                     max_count=config.CRAWLER_MAX_COMMENTS_COUNT_SINGLENOTES,
                 )
+                
+                # 标记该帖子的评论已处理
+                if progress:
+                    progress.mark_comment_note_processed(note_id)
+                    progress.total_comments_crawled += 1
+                    
             except DataFetchError as ex:
                 utils.logger.error(f"[WeiboCrawler.get_note_comments] get note_id: {note_id} comment error: {ex}")
             except Exception as e:
@@ -304,66 +440,134 @@ class WeiboCrawler(AbstractCrawler):
 
     async def get_creators_and_notes(self) -> None:
         """
-        Get creator's information and their notes and comments
+        Get creator's information and their notes and comments - 支持断点续爬
         Returns:
 
         """
         utils.logger.info("[WeiboCrawler.get_creators_and_notes] Begin get weibo creators")
-        for user_id in config.WEIBO_CREATOR_ID_LIST:
-            createor_info_res: Dict = await self.wb_client.get_creator_info_by_id(creator_id=user_id)
-            if createor_info_res:
-                createor_info: Dict = createor_info_res.get("userInfo", {})
-                utils.logger.info(f"[WeiboCrawler.get_creators_and_notes] creator info: {createor_info}")
-                if not createor_info:
-                    raise DataFetchError("Get creator info error")
-                await weibo_store.save_creator(user_id, user_info=createor_info)
+        
+        # 初始化或恢复进度（使用父类方法）
+        progress = await self._init_or_resume_progress(
+            platform="wb",
+            crawler_type="creator",
+            creator_ids=list(config.WEIBO_CREATOR_ID_LIST)
+        )
+        
+        # 从进度中获取起始位置
+        start_creator_index = progress.current_creator_index
+        creator_ids = progress.creator_ids
+        
+        utils.logger.info(f"[WeiboCrawler.get_creators_and_notes] Starting from creator index {start_creator_index}")
+        
+        try:
+            for creator_idx in range(start_creator_index, len(creator_ids)):
+                user_id = creator_ids[creator_idx]
+                progress.current_creator_index = creator_idx
+                
+                utils.logger.info(f"[WeiboCrawler.get_creators_and_notes] Processing creator {user_id} ({creator_idx + 1}/{len(creator_ids)})")
+                
+                createor_info_res: Dict = await self.wb_client.get_creator_info_by_id(creator_id=user_id)
+                if createor_info_res:
+                    createor_info: Dict = createor_info_res.get("userInfo", {})
+                    utils.logger.info(f"[WeiboCrawler.get_creators_and_notes] creator info: {createor_info}")
+                    if not createor_info:
+                        raise DataFetchError("Get creator info error")
+                    await weibo_store.save_creator(user_id, user_info=createor_info)
 
-                # Create a wrapper callback to get full text before saving data
-                async def save_notes_with_full_text(note_list: List[Dict]):
-                    # If full text fetching is enabled, batch get full text first
-                    updated_note_list = await self.batch_get_notes_full_text(note_list)
-                    await weibo_store.batch_update_weibo_notes(updated_note_list)
+                    # Create a wrapper callback to get full text before saving data
+                    async def save_notes_with_full_text(note_list: List[Dict]):
+                        # If full text fetching is enabled, batch get full text first
+                        updated_note_list = await self.batch_get_notes_full_text(note_list)
+                        await weibo_store.batch_update_weibo_notes(updated_note_list)
+                        # 更新进度中的已处理帖子
+                        for note_item in updated_note_list:
+                            note_id = note_item.get("mblog", {}).get("id")
+                            if note_id:
+                                progress.mark_note_processed(note_id)
 
-                # Get all note information of the creator
-                all_notes_list = await self.wb_client.get_all_notes_by_creator_id(
-                    creator_id=user_id,
-                    container_id=f"107603{user_id}",
-                    crawl_interval=0,
-                    callback=save_notes_with_full_text,
-                )
+                    # Get all note information of the creator
+                    all_notes_list = await self.wb_client.get_all_notes_by_creator_id(
+                        creator_id=user_id,
+                        container_id=f"107603{user_id}",
+                        crawl_interval=0,
+                        callback=save_notes_with_full_text,
+                    )
 
-                note_ids = [note_item.get("mblog", {}).get("id") for note_item in all_notes_list if note_item.get("mblog", {}).get("id")]
-                await self.batch_get_notes_comments(note_ids)
+                    note_ids = [note_item.get("mblog", {}).get("id") for note_item in all_notes_list if note_item.get("mblog", {}).get("id")]
+                    await self.batch_get_notes_comments(note_ids, progress)
+                    
+                    # 更新创作者进度
+                    progress.total_creators_crawled += 1
+                    await self._save_progress_if_needed(progress, force=True)
 
-            else:
-                utils.logger.error(f"[WeiboCrawler.get_creators_and_notes] get creator info error, creator_id:{user_id}")
+                else:
+                    utils.logger.error(f"[WeiboCrawler.get_creators_and_notes] get creator info error, creator_id:{user_id}")
+            
+            # 标记完成
+            await self._mark_progress_completed(progress)
+            
+        except Exception as e:
+            utils.logger.error(f"[WeiboCrawler.get_creators_and_notes] Error: {e}")
+            progress.record_error(str(e))
+            await self._save_progress_if_needed(progress, force=True)
+            raise
 
     async def get_creators_vip_content(self) -> None:
         """
-        Get VIP exclusive content from creators
+        Get VIP exclusive content from creators - 支持断点续爬
         This method uses page navigation with pagination to fetch all VIP content
         Returns:
 
         """
         utils.logger.info("[WeiboCrawler.get_creators_vip_content] Begin get weibo VIP creators content")
 
-        for vuid in config.WEIBO_VIP_CREATOR_ID_LIST:
-            utils.logger.info(f"[WeiboCrawler.get_creators_vip_content] Processing VIP creator: {vuid}")
+        # 初始化或恢复进度（使用父类方法）
+        progress = await self._init_or_resume_progress(
+            platform="wb",
+            crawler_type="creator_vip",
+            vip_creator_ids=list(config.WEIBO_VIP_CREATOR_ID_LIST)
+        )
+        
+        # 从进度中获取起始位置
+        start_vip_index = progress.current_vip_creator_index
+        vip_creator_ids = progress.vip_creator_ids
+        
+        utils.logger.info(f"[WeiboCrawler.get_creators_vip_content] Starting from VIP creator index {start_vip_index}")
 
-            # Use page navigation with pagination to fetch all VIP content
-            all_vip_content = await self.fetch_vip_content_via_page_pagination(vuid)
+        try:
+            for vip_idx in range(start_vip_index, len(vip_creator_ids)):
+                vuid = vip_creator_ids[vip_idx]
+                progress.current_vip_creator_index = vip_idx
+                
+                utils.logger.info(f"[WeiboCrawler.get_creators_vip_content] Processing VIP creator: {vuid} ({vip_idx + 1}/{len(vip_creator_ids)})")
 
-            utils.logger.info(f"[WeiboCrawler.get_creators_vip_content] Finished processing VIP creator {vuid}, total items: {len(all_vip_content)}")
+                # Use page navigation with pagination to fetch all VIP content
+                all_vip_content = await self.fetch_vip_content_via_page_pagination(vuid, progress)
 
-            # Sleep between creators
-            await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
+                utils.logger.info(f"[WeiboCrawler.get_creators_vip_content] Finished processing VIP creator {vuid}, total items: {len(all_vip_content)}")
+                
+                # 保存进度
+                await self._save_progress_if_needed(progress, force=True)
 
-    async def fetch_vip_content_via_page_pagination(self, vuid: str) -> List[Dict]:
+                # Sleep between creators
+                await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
+            
+            # 标记完成
+            await self._mark_progress_completed(progress)
+            
+        except Exception as e:
+            utils.logger.error(f"[WeiboCrawler.get_creators_vip_content] Error: {e}")
+            progress.record_error(str(e))
+            await self._save_progress_if_needed(progress, force=True)
+            raise
+
+    async def fetch_vip_content_via_page_pagination(self, vuid: str, progress: Optional[CrawlProgress] = None) -> List[Dict]:
         """
         Fetch VIP content by first visiting the page to get cookies, then directly calling API with page parameter
         This is more reliable than scrolling as we directly control the pagination
         Args:
             vuid: VIP creator user ID
+            progress: 进度对象（可选）
 
         Returns: List of all VIP content items
 
@@ -783,6 +987,12 @@ class WeiboCrawler(AbstractCrawler):
 
     async def close(self):
         """Close browser context"""
+        # 保存当前进度（使用父类方法）
+        await self._save_progress_on_close()
+        
+        # 保存账号池状态
+        await self._save_account_pool_on_close()
+        
         # Special handling if using CDP mode
         if self.cdp_manager:
             await self.cdp_manager.cleanup()

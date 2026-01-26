@@ -22,7 +22,7 @@
 # @Time    : 2023/12/2 13:45
 # @Desc    : IP proxy pool implementation
 import random
-from typing import Dict, List
+from typing import TYPE_CHECKING, Dict, List, Optional
 
 import httpx
 from tenacity import retry, stop_after_attempt, wait_fixed
@@ -36,6 +36,9 @@ from tools import utils
 
 from .base_proxy import ProxyProvider
 from .types import IpInfoModel, ProviderNameEnum
+
+if TYPE_CHECKING:
+    from account.account_pool import Account
 
 
 class ProxyIpPool:
@@ -147,6 +150,34 @@ class ProxyIpPool:
         """
         self.proxy_list = []
         await self.load_proxies()
+    
+    def set_proxy_from_account(self, account: "Account") -> Optional[IpInfoModel]:
+        """
+        从账号配置设置代理
+        用于账号绑定代理的场景
+        
+        Args:
+            account: 账号对象
+        
+        Returns:
+            IpInfoModel: 代理信息，如果账号没有配置代理则返回None
+        """
+        if not account.proxy_ip or not account.proxy_port:
+            return None
+        
+        proxy = IpInfoModel(
+            ip=account.proxy_ip,
+            port=account.proxy_port,
+            user=account.proxy_user or "",
+            password=account.proxy_password or "",
+            protocol="http://",
+            expired_time_ts=None,  # 账号绑定的代理不设置过期时间
+        )
+        self.current_proxy = proxy
+        utils.logger.info(
+            f"[ProxyIpPool] Set proxy from account: {proxy.ip}:{proxy.port}"
+        )
+        return proxy
 
 
 IpProxyProvider: Dict[str, ProxyProvider] = {

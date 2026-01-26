@@ -23,7 +23,10 @@ import asyncio
 import os
 # import random  # Removed as we now use fixed config.CRAWLER_MAX_SLEEP_SEC intervals
 from asyncio import Task
-from typing import Dict, List, Optional, Tuple, cast
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, cast
+
+if TYPE_CHECKING:
+    from crawler.progress import CrawlProgress
 
 from playwright.async_api import (
     BrowserContext,
@@ -56,6 +59,7 @@ class ZhihuCrawler(AbstractCrawler):
     cdp_manager: Optional[CDPBrowserManager]
 
     def __init__(self) -> None:
+        super().__init__()  # 初始化断点续爬相关属性
         self.index_url = "https://www.zhihu.com"
         # self.user_agent = utils.get_user_agent()
         self.user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
@@ -69,8 +73,24 @@ class ZhihuCrawler(AbstractCrawler):
         Returns:
 
         """
+        # 初始化进度管理器
+        self._init_progress_manager()
+        
+        # 初始化账号池
+        await self._init_account_pool("zhihu")
+        
         playwright_proxy_format, httpx_proxy_format = None, None
-        if config.ENABLE_IP_PROXY:
+        
+        # 优先使用多账号模式的代理配置
+        if self._has_multi_account():
+            account = await self._get_next_account()
+            if account:
+                playwright_proxy_format, httpx_proxy_format = self._get_account_proxy()
+                if playwright_proxy_format:
+                    utils.logger.info(f"[ZhihuCrawler] Using account proxy: {account.proxy_ip}")
+        
+        # 如果没有账号代理，使用全局代理池
+        if not httpx_proxy_format and config.ENABLE_IP_PROXY:
             self.ip_proxy_pool = await create_ip_pool(
                 config.IP_PROXY_POOL_COUNT, enable_validate_ip=True
             )
@@ -105,12 +125,21 @@ class ZhihuCrawler(AbstractCrawler):
             # Create a client to interact with the zhihu website.
             self.zhihu_client = await self.create_zhihu_client(httpx_proxy_format)
             if not await self.zhihu_client.pong():
+                # 优先使用账号的Cookie
+                cookie_str = self._get_account_cookies() or config.COOKIES
+                login_type = config.LOGIN_TYPE
+                
+                # 如果有账号Cookie，使用cookie登录方式
+                if self._current_account and self._current_account.cookies:
+                    login_type = "cookie"
+                    utils.logger.info(f"[ZhihuCrawler] Using account cookies for login")
+                
                 login_obj = ZhiHuLogin(
-                    login_type=config.LOGIN_TYPE,
+                    login_type=login_type,
                     login_phone="",  # input your phone number
                     browser_context=self.browser_context,
                     context_page=self.context_page,
-                    cookie_str=config.COOKIES,
+                    cookie_str=cookie_str,
                 )
                 await login_obj.begin()
                 await self.zhihu_client.update_cookies(
@@ -148,13 +177,29 @@ class ZhihuCrawler(AbstractCrawler):
         zhihu_limit_count = 20  # zhihu limit page fixed value
         if config.CRAWLER_MAX_NOTES_COUNT < zhihu_limit_count:
             config.CRAWLER_MAX_NOTES_COUNT = zhihu_limit_count
+        
+        # 初始化或恢复进度
+        keywords_list = [kw.strip() for kw in config.KEYWORDS.split(",") if kw.strip()]
+        progress = await self._init_or_resume_progress(
+            platform="zhihu",
+            crawler_type="search",
+            keywords=keywords_list,
+        )
+        
         start_page = config.START_PAGE
-        for keyword in config.KEYWORDS.split(","):
+        
+        # 从上次的关键词索引开始
+        for keyword_idx in range(progress.current_keyword_index, len(keywords_list)):
+            keyword = keywords_list[keyword_idx]
+            progress.current_keyword_index = keyword_idx
             source_keyword_var.set(keyword)
             utils.logger.info(
                 f"[ZhihuCrawler.search] Current search keyword: {keyword}"
             )
-            page = 1
+            
+            # 从上次的页码开始
+            page = progress.current_page if keyword_idx == progress.current_keyword_index else 1
+            
             while (
                 page - start_page + 1
             ) * zhihu_limit_count <= config.CRAWLER_MAX_NOTES_COUNT:
@@ -167,6 +212,8 @@ class ZhihuCrawler(AbstractCrawler):
                     utils.logger.info(
                         f"[ZhihuCrawler.search] search zhihu keyword: {keyword}, page: {page}"
                     )
+                    progress.current_page = page
+                    
                     content_list: List[ZhihuContent] = (
                         await self.zhihu_client.get_note_by_keyword(
                             keyword=keyword,
@@ -185,19 +232,39 @@ class ZhihuCrawler(AbstractCrawler):
                     utils.logger.info(f"[ZhihuCrawler.search] Sleeping for {config.CRAWLER_MAX_SLEEP_SEC} seconds after page {page-1}")
 
                     page += 1
+                    filtered_content_list = []
                     for content in content_list:
+                        # 跳过已处理的内容
+                        if progress.is_note_processed(content.content_id):
+                            utils.logger.debug(f"[ZhihuCrawler.search] Skip processed content: {content.content_id}")
+                            continue
+                        
                         await zhihu_store.update_zhihu_content(content)
+                        filtered_content_list.append(content)
+                        
+                        # 标记内容已处理
+                        progress.mark_note_processed(content.content_id)
+                        await self._save_progress_if_needed(progress)
 
-                    await self.batch_get_content_comments(content_list)
-                except DataFetchError:
+                    await self.batch_get_content_comments(filtered_content_list, progress)
+                except DataFetchError as e:
                     utils.logger.error("[ZhihuCrawler.search] Search content error")
+                    progress.record_error(str(e))
+                    await self._save_progress_if_needed(progress, force=True)
                     return
+            
+            # 重置页码为下一个关键词
+            progress.current_page = 1
+        
+        # 标记任务完成
+        await self._mark_progress_completed(progress)
 
-    async def batch_get_content_comments(self, content_list: List[ZhihuContent]):
+    async def batch_get_content_comments(self, content_list: List[ZhihuContent], progress: Optional["CrawlProgress"] = None):
         """
         Batch get content comments
         Args:
             content_list:
+            progress:
 
         Returns:
 
@@ -208,23 +275,28 @@ class ZhihuCrawler(AbstractCrawler):
             )
             return
 
+        # 过滤已处理评论的内容
+        if progress:
+            content_list = [c for c in content_list if not progress.is_comment_note_processed(c.content_id)]
+
         semaphore = asyncio.Semaphore(config.MAX_CONCURRENCY_NUM)
         task_list: List[Task] = []
         for content_item in content_list:
             task = asyncio.create_task(
-                self.get_comments(content_item, semaphore), name=content_item.content_id
+                self.get_comments(content_item, semaphore, progress), name=content_item.content_id
             )
             task_list.append(task)
         await asyncio.gather(*task_list)
 
     async def get_comments(
-        self, content_item: ZhihuContent, semaphore: asyncio.Semaphore
+        self, content_item: ZhihuContent, semaphore: asyncio.Semaphore, progress: Optional["CrawlProgress"] = None
     ):
         """
         Get note comments with keyword filtering and quantity limitation
         Args:
             content_item:
             semaphore:
+            progress:
 
         Returns:
 
@@ -243,6 +315,12 @@ class ZhihuCrawler(AbstractCrawler):
                 crawl_interval=config.CRAWLER_MAX_SLEEP_SEC,
                 callback=zhihu_store.batch_update_zhihu_note_comments,
             )
+            
+            # 标记评论已处理
+            if progress:
+                progress.mark_comment_note_processed(content_item.content_id)
+                progress.total_comments_crawled += 1
+                await self._save_progress_if_needed(progress)
 
     async def get_creators_and_notes(self) -> None:
         """
@@ -363,30 +441,50 @@ class ZhihuCrawler(AbstractCrawler):
         Returns:
 
         """
+        # 初始化或恢复进度
+        progress = await self._init_or_resume_progress(
+            platform="zhihu",
+            crawler_type="detail",
+            note_ids=config.ZHIHU_SPECIFIED_ID_LIST,
+        )
+        
         get_note_detail_task_list = []
         for full_note_url in config.ZHIHU_SPECIFIED_ID_LIST:
             # remove query params
             full_note_url = full_note_url.split("?")[0]
+            
+            # 跳过已处理的内容
+            if progress.is_note_processed(full_note_url):
+                utils.logger.debug(f"[ZhihuCrawler.get_specified_notes] Skip processed note: {full_note_url}")
+                continue
+            
             crawler_task = self.get_note_detail(
                 full_note_url=full_note_url,
                 semaphore=asyncio.Semaphore(config.MAX_CONCURRENCY_NUM),
             )
-            get_note_detail_task_list.append(crawler_task)
+            get_note_detail_task_list.append((full_note_url, crawler_task))
 
         need_get_comment_notes: List[ZhihuContent] = []
-        note_details = await asyncio.gather(*get_note_detail_task_list)
-        for index, note_detail in enumerate(note_details):
+        for full_note_url, crawler_task in get_note_detail_task_list:
+            note_detail = await crawler_task
             if not note_detail:
                 utils.logger.info(
-                    f"[ZhihuCrawler.get_specified_notes] Note {config.ZHIHU_SPECIFIED_ID_LIST[index]} not found"
+                    f"[ZhihuCrawler.get_specified_notes] Note {full_note_url} not found"
                 )
                 continue
 
             note_detail = cast(ZhihuContent, note_detail)  # only for type check
             need_get_comment_notes.append(note_detail)
             await zhihu_store.update_zhihu_content(note_detail)
+            
+            # 标记内容已处理
+            progress.mark_note_processed(full_note_url)
+            await self._save_progress_if_needed(progress)
 
-        await self.batch_get_content_comments(need_get_comment_notes)
+        await self.batch_get_content_comments(need_get_comment_notes, progress)
+        
+        # 标记任务完成
+        await self._mark_progress_completed(progress)
 
     async def create_zhihu_client(self, httpx_proxy: Optional[str]) -> ZhiHuClient:
         """Create zhihu client"""
@@ -485,6 +583,12 @@ class ZhihuCrawler(AbstractCrawler):
 
     async def close(self):
         """Close browser context"""
+        # 保存进度
+        await self._save_progress_on_close()
+        
+        # 保存账号池状态
+        await self._save_account_pool_on_close()
+        
         # Special handling if using CDP mode
         if self.cdp_manager:
             await self.cdp_manager.cleanup()

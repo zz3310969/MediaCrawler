@@ -26,7 +26,10 @@ import asyncio
 import os
 # import random  # Removed as we now use fixed config.CRAWLER_MAX_SLEEP_SEC intervals
 from asyncio import Task
-from typing import Dict, List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union
+
+if TYPE_CHECKING:
+    from crawler.progress import CrawlProgress
 from datetime import datetime, timedelta
 import pandas as pd
 
@@ -61,14 +64,31 @@ class BilibiliCrawler(AbstractCrawler):
     cdp_manager: Optional[CDPBrowserManager]
 
     def __init__(self):
+        super().__init__()  # 初始化断点续爬相关属性
         self.index_url = "https://www.bilibili.com"
         self.user_agent = utils.get_user_agent()
         self.cdp_manager = None
         self.ip_proxy_pool = None  # Proxy IP pool for automatic proxy refresh
 
     async def start(self):
+        # 初始化进度管理器
+        self._init_progress_manager()
+        
+        # 初始化账号池
+        await self._init_account_pool("bili")
+        
         playwright_proxy_format, httpx_proxy_format = None, None
-        if config.ENABLE_IP_PROXY:
+        
+        # 优先使用多账号模式的代理配置
+        if self._has_multi_account():
+            account = await self._get_next_account()
+            if account:
+                playwright_proxy_format, httpx_proxy_format = self._get_account_proxy()
+                if playwright_proxy_format:
+                    utils.logger.info(f"[BilibiliCrawler] Using account proxy: {account.proxy_ip}")
+        
+        # 如果没有账号代理，使用全局代理池
+        if not httpx_proxy_format and config.ENABLE_IP_PROXY:
             self.ip_proxy_pool = await create_ip_pool(config.IP_PROXY_POOL_COUNT, enable_validate_ip=True)
             ip_proxy_info: IpInfoModel = await self.ip_proxy_pool.get_proxy()
             playwright_proxy_format, httpx_proxy_format = utils.format_proxy_info(ip_proxy_info)
@@ -97,12 +117,21 @@ class BilibiliCrawler(AbstractCrawler):
             # Create a client to interact with the xiaohongshu website.
             self.bili_client = await self.create_bilibili_client(httpx_proxy_format)
             if not await self.bili_client.pong():
+                # 优先使用账号的Cookie
+                cookie_str = self._get_account_cookies() or config.COOKIES
+                login_type = config.LOGIN_TYPE
+                
+                # 如果有账号Cookie，使用cookie登录方式
+                if self._current_account and self._current_account.cookies:
+                    login_type = "cookie"
+                    utils.logger.info(f"[BilibiliCrawler] Using account cookies for login")
+                
                 login_obj = BilibiliLogin(
-                    login_type=config.LOGIN_TYPE,
+                    login_type=login_type,
                     login_phone="",  # your phone number
                     browser_context=self.browser_context,
                     context_page=self.context_page,
-                    cookie_str=config.COOKIES,
+                    cookie_str=cookie_str,
                 )
                 await login_obj.begin()
                 await self.bili_client.update_cookies(browser_context=self.browser_context)
@@ -185,11 +214,27 @@ class BilibiliCrawler(AbstractCrawler):
         bili_limit_count = 20  # bilibili limit page fixed value
         if config.CRAWLER_MAX_NOTES_COUNT < bili_limit_count:
             config.CRAWLER_MAX_NOTES_COUNT = bili_limit_count
+        
+        # 初始化或恢复进度
+        keywords_list = [kw.strip() for kw in config.KEYWORDS.split(",") if kw.strip()]
+        progress = await self._init_or_resume_progress(
+            platform="bili",
+            crawler_type="search",
+            keywords=keywords_list,
+        )
+        
         start_page = config.START_PAGE  # start page number
-        for keyword in config.KEYWORDS.split(","):
+        
+        # 从上次的关键词索引开始
+        for keyword_idx in range(progress.current_keyword_index, len(keywords_list)):
+            keyword = keywords_list[keyword_idx]
+            progress.current_keyword_index = keyword_idx
             source_keyword_var.set(keyword)
             utils.logger.info(f"[BilibiliCrawler.search_by_keywords] Current search keyword: {keyword}")
-            page = 1
+            
+            # 从上次的页码开始
+            page = progress.current_page if keyword_idx == progress.current_keyword_index else 1
+            
             while (page - start_page + 1) * bili_limit_count <= config.CRAWLER_MAX_NOTES_COUNT:
                 if page < start_page:
                     utils.logger.info(f"[BilibiliCrawler.search_by_keywords] Skip page: {page}")
@@ -197,6 +242,8 @@ class BilibiliCrawler(AbstractCrawler):
                     continue
 
                 utils.logger.info(f"[BilibiliCrawler.search_by_keywords] search bilibili keyword: {keyword}, page: {page}")
+                progress.current_page = page
+                
                 video_id_list: List[str] = []
                 videos_res = await self.bili_client.search_video_by_keyword(
                     keyword=keyword,
@@ -218,20 +265,39 @@ class BilibiliCrawler(AbstractCrawler):
                     task_list = [self.get_video_info_task(aid=video_item.get("aid"), bvid="", semaphore=semaphore) for video_item in video_list]
                 except Exception as e:
                     utils.logger.warning(f"[BilibiliCrawler.search_by_keywords] error in the task list. The video for this page will not be included. {e}")
+                    progress.record_error(str(e))
                 video_items = await asyncio.gather(*task_list)
                 for video_item in video_items:
                     if video_item:
-                        video_id_list.append(video_item.get("View").get("aid"))
+                        video_aid = str(video_item.get("View").get("aid"))
+                        
+                        # 跳过已处理的视频
+                        if progress.is_note_processed(video_aid):
+                            utils.logger.debug(f"[BilibiliCrawler.search_by_keywords] Skip processed video: {video_aid}")
+                            continue
+                        
+                        video_id_list.append(video_aid)
                         await bilibili_store.update_bilibili_video(video_item)
                         await bilibili_store.update_up_info(video_item)
                         await self.get_bilibili_video(video_item, semaphore)
+                        
+                        # 标记视频已处理
+                        progress.mark_note_processed(video_aid)
+                        await self._save_progress_if_needed(progress)
+                
                 page += 1
 
                 # Sleep after page navigation
                 await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
                 utils.logger.info(f"[BilibiliCrawler.search_by_keywords] Sleeping for {config.CRAWLER_MAX_SLEEP_SEC} seconds after page {page-1}")
 
-                await self.batch_get_video_comments(video_id_list)
+                await self.batch_get_video_comments(video_id_list, progress)
+            
+            # 重置页码为下一个关键词
+            progress.current_page = 1
+        
+        # 标记任务完成
+        await self._mark_progress_completed(progress)
 
     async def search_by_keywords_in_time_range(self, daily_limit: bool):
         """
@@ -318,29 +384,35 @@ class BilibiliCrawler(AbstractCrawler):
                         utils.logger.error(f"[BilibiliCrawler.search] Error searching on {day.ctime()}: {e}")
                         break
 
-    async def batch_get_video_comments(self, video_id_list: List[str]):
+    async def batch_get_video_comments(self, video_id_list: List[str], progress: Optional["CrawlProgress"] = None):
         """
         batch get video comments
         :param video_id_list:
+        :param progress:
         :return:
         """
         if not config.ENABLE_GET_COMMENTS:
             utils.logger.info(f"[BilibiliCrawler.batch_get_note_comments] Crawling comment mode is not enabled")
             return
 
+        # 过滤已处理评论的视频
+        if progress:
+            video_id_list = [vid for vid in video_id_list if not progress.is_comment_note_processed(str(vid))]
+
         utils.logger.info(f"[BilibiliCrawler.batch_get_video_comments] video ids:{video_id_list}")
         semaphore = asyncio.Semaphore(config.MAX_CONCURRENCY_NUM)
         task_list: List[Task] = []
         for video_id in video_id_list:
-            task = asyncio.create_task(self.get_comments(video_id, semaphore), name=video_id)
+            task = asyncio.create_task(self.get_comments(video_id, semaphore, progress), name=str(video_id))
             task_list.append(task)
         await asyncio.gather(*task_list)
 
-    async def get_comments(self, video_id: str, semaphore: asyncio.Semaphore):
+    async def get_comments(self, video_id: str, semaphore: asyncio.Semaphore, progress: Optional["CrawlProgress"] = None):
         """
         get comment for video id
         :param video_id:
         :param semaphore:
+        :param progress:
         :return:
         """
         async with semaphore:
@@ -355,6 +427,12 @@ class BilibiliCrawler(AbstractCrawler):
                     callback=bilibili_store.batch_update_bilibili_video_comments,
                     max_count=config.CRAWLER_MAX_COMMENTS_COUNT_SINGLENOTES,
                 )
+                
+                # 标记评论已处理
+                if progress:
+                    progress.mark_comment_note_processed(str(video_id))
+                    progress.total_comments_crawled += 1
+                    await self._save_progress_if_needed(progress)
 
             except DataFetchError as ex:
                 utils.logger.error(f"[BilibiliCrawler.get_comments] get video_id: {video_id} comment error: {ex}")
@@ -380,21 +458,44 @@ class BilibiliCrawler(AbstractCrawler):
             utils.logger.info(f"[BilibiliCrawler.get_creator_videos] Sleeping for {config.CRAWLER_MAX_SLEEP_SEC} seconds after page {pn}")
             pn += 1
 
-    async def get_specified_videos(self, video_url_list: List[str]):
+    async def get_specified_videos(self, video_url_list: List[str], progress: Optional["CrawlProgress"] = None):
         """
         get specified videos info from URLs or BV IDs
         :param video_url_list: List of video URLs or BV IDs
+        :param progress: Optional progress object for resume support
         :return:
         """
         utils.logger.info("[BilibiliCrawler.get_specified_videos] Parsing video URLs...")
+        
+        # 如果没有传入 progress，创建一个新的
+        if progress is None:
+            bvids_for_progress = []
+            for video_url in video_url_list:
+                try:
+                    video_info = parse_video_info_from_url(video_url)
+                    bvids_for_progress.append(video_info.video_id)
+                except ValueError:
+                    bvids_for_progress.append(video_url)
+            
+            progress = await self._init_or_resume_progress(
+                platform="bili",
+                crawler_type="detail",
+                note_ids=bvids_for_progress,
+            )
+        
         bvids_list = []
         for video_url in video_url_list:
             try:
                 video_info = parse_video_info_from_url(video_url)
+                # 跳过已处理的视频
+                if progress.is_note_processed(video_info.video_id):
+                    utils.logger.debug(f"[BilibiliCrawler.get_specified_videos] Skip processed video: {video_info.video_id}")
+                    continue
                 bvids_list.append(video_info.video_id)
                 utils.logger.info(f"[BilibiliCrawler.get_specified_videos] Parsed video ID: {video_info.video_id} from {video_url}")
             except ValueError as e:
                 utils.logger.error(f"[BilibiliCrawler.get_specified_videos] Failed to parse video URL: {e}")
+                progress.record_error(str(e))
                 continue
 
         semaphore = asyncio.Semaphore(config.MAX_CONCURRENCY_NUM)
@@ -404,13 +505,22 @@ class BilibiliCrawler(AbstractCrawler):
         for video_detail in video_details:
             if video_detail is not None:
                 video_item_view: Dict = video_detail.get("View")
-                video_aid: str = video_item_view.get("aid")
+                video_aid: str = str(video_item_view.get("aid"))
+                video_bvid: str = video_item_view.get("bvid", "")
                 if video_aid:
                     video_aids_list.append(video_aid)
                 await bilibili_store.update_bilibili_video(video_detail)
                 await bilibili_store.update_up_info(video_detail)
                 await self.get_bilibili_video(video_detail, semaphore)
-        await self.batch_get_video_comments(video_aids_list)
+                
+                # 标记视频已处理
+                progress.mark_note_processed(video_bvid or video_aid)
+                await self._save_progress_if_needed(progress)
+        
+        await self.batch_get_video_comments(video_aids_list, progress)
+        
+        # 标记任务完成
+        await self._mark_progress_completed(progress)
 
     async def get_video_info_task(self, aid: int, bvid: str, semaphore: asyncio.Semaphore) -> Optional[Dict]:
         """
@@ -550,6 +660,12 @@ class BilibiliCrawler(AbstractCrawler):
 
     async def close(self):
         """Close browser context"""
+        # 保存进度
+        await self._save_progress_on_close()
+        
+        # 保存账号池状态
+        await self._save_account_pool_on_close()
+        
         try:
             # If using CDP mode, special handling is required
             if self.cdp_manager:

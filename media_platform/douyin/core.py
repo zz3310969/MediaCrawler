@@ -21,7 +21,10 @@ import asyncio
 import os
 import random
 from asyncio import Task
-from typing import Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+
+if TYPE_CHECKING:
+    from crawler.progress import CrawlProgress
 
 from playwright.async_api import (
     BrowserContext,
@@ -53,13 +56,30 @@ class DouYinCrawler(AbstractCrawler):
     cdp_manager: Optional[CDPBrowserManager]
 
     def __init__(self) -> None:
+        super().__init__()  # 初始化断点续爬相关属性
         self.index_url = "https://www.douyin.com"
         self.cdp_manager = None
         self.ip_proxy_pool = None  # 代理IP池，用于代理自动刷新
 
     async def start(self) -> None:
+        # 初始化进度管理器
+        self._init_progress_manager()
+        
+        # 初始化账号池
+        await self._init_account_pool("dy")
+        
         playwright_proxy_format, httpx_proxy_format = None, None
-        if config.ENABLE_IP_PROXY:
+        
+        # 优先使用多账号模式的代理配置
+        if self._has_multi_account():
+            account = await self._get_next_account()
+            if account:
+                playwright_proxy_format, httpx_proxy_format = self._get_account_proxy()
+                if playwright_proxy_format:
+                    utils.logger.info(f"[DouYinCrawler] Using account proxy: {account.proxy_ip}")
+        
+        # 如果没有账号代理，使用全局代理池
+        if not httpx_proxy_format and config.ENABLE_IP_PROXY:
             self.ip_proxy_pool = await create_ip_pool(config.IP_PROXY_POOL_COUNT, enable_validate_ip=True)
             ip_proxy_info: IpInfoModel = await self.ip_proxy_pool.get_proxy()
             playwright_proxy_format, httpx_proxy_format = utils.format_proxy_info(ip_proxy_info)
@@ -92,12 +112,21 @@ class DouYinCrawler(AbstractCrawler):
 
             self.dy_client = await self.create_douyin_client(httpx_proxy_format)
             if not await self.dy_client.pong(browser_context=self.browser_context):
+                # 优先使用账号的Cookie
+                cookie_str = self._get_account_cookies() or config.COOKIES
+                login_type = config.LOGIN_TYPE
+                
+                # 如果有账号Cookie，使用cookie登录方式
+                if self._current_account and self._current_account.cookies:
+                    login_type = "cookie"
+                    utils.logger.info(f"[DouYinCrawler] Using account cookies for login")
+                
                 login_obj = DouYinLogin(
-                    login_type=config.LOGIN_TYPE,
+                    login_type=login_type,
                     login_phone="",  # you phone number
                     browser_context=self.browser_context,
                     context_page=self.context_page,
-                    cookie_str=config.COOKIES,
+                    cookie_str=cookie_str,
                 )
                 await login_obj.begin()
                 await self.dy_client.update_cookies(browser_context=self.browser_context)
@@ -119,13 +148,29 @@ class DouYinCrawler(AbstractCrawler):
         dy_limit_count = 10  # douyin limit page fixed value
         if config.CRAWLER_MAX_NOTES_COUNT < dy_limit_count:
             config.CRAWLER_MAX_NOTES_COUNT = dy_limit_count
+        
+        # 初始化或恢复进度
+        keywords_list = [kw.strip() for kw in config.KEYWORDS.split(",") if kw.strip()]
+        progress = await self._init_or_resume_progress(
+            platform="dy",
+            crawler_type="search",
+            keywords=keywords_list,
+        )
+        
         start_page = config.START_PAGE  # start page number
-        for keyword in config.KEYWORDS.split(","):
+        
+        # 从上次的关键词索引开始
+        for keyword_idx in range(progress.current_keyword_index, len(keywords_list)):
+            keyword = keywords_list[keyword_idx]
+            progress.current_keyword_index = keyword_idx
             source_keyword_var.set(keyword)
             utils.logger.info(f"[DouYinCrawler.search] Current keyword: {keyword}")
             aweme_list: List[str] = []
-            page = 0
+            
+            # 从上次的页码开始
+            page = progress.current_page if keyword_idx == progress.current_keyword_index else 0
             dy_search_id = ""
+            
             while (page - start_page + 1) * dy_limit_count <= config.CRAWLER_MAX_NOTES_COUNT:
                 if page < start_page:
                     utils.logger.info(f"[DouYinCrawler.search] Skip {page}")
@@ -133,6 +178,8 @@ class DouYinCrawler(AbstractCrawler):
                     continue
                 try:
                     utils.logger.info(f"[DouYinCrawler.search] search douyin keyword: {keyword}, page: {page}")
+                    progress.current_page = page
+                    
                     posts_res = await self.dy_client.search_info_by_keyword(
                         keyword=keyword,
                         offset=page * dy_limit_count - dy_limit_count,
@@ -142,8 +189,10 @@ class DouYinCrawler(AbstractCrawler):
                     if posts_res.get("data") is None or posts_res.get("data") == []:
                         utils.logger.info(f"[DouYinCrawler.search] search douyin keyword: {keyword}, page: {page} is empty,{posts_res.get('data')}`")
                         break
-                except DataFetchError:
+                except DataFetchError as e:
                     utils.logger.error(f"[DouYinCrawler.search] search douyin keyword: {keyword} failed")
+                    progress.record_error(str(e))
+                    await self._save_progress_if_needed(progress, force=True)
                     break
 
                 page += 1
@@ -157,22 +206,60 @@ class DouYinCrawler(AbstractCrawler):
                         aweme_info: Dict = (post_item.get("aweme_info") or post_item.get("aweme_mix_info", {}).get("mix_items")[0])
                     except TypeError:
                         continue
-                    aweme_list.append(aweme_info.get("aweme_id", ""))
-                    page_aweme_list.append(aweme_info.get("aweme_id", ""))
+                    aweme_id = aweme_info.get("aweme_id", "")
+                    
+                    # 跳过已处理的视频
+                    if progress.is_note_processed(aweme_id):
+                        utils.logger.debug(f"[DouYinCrawler.search] Skip processed aweme: {aweme_id}")
+                        continue
+                    
+                    aweme_list.append(aweme_id)
+                    page_aweme_list.append(aweme_id)
                     await douyin_store.update_douyin_aweme(aweme_item=aweme_info)
                     await self.get_aweme_media(aweme_item=aweme_info)
+                    
+                    # 标记视频已处理
+                    progress.mark_note_processed(aweme_id)
+                    await self._save_progress_if_needed(progress)
                 
                 # Batch get note comments for the current page
-                await self.batch_get_note_comments(page_aweme_list)
+                await self.batch_get_note_comments(page_aweme_list, progress)
 
                 # Sleep after each page navigation
                 await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
                 utils.logger.info(f"[DouYinCrawler.search] Sleeping for {config.CRAWLER_MAX_SLEEP_SEC} seconds after page {page-1}")
+            
             utils.logger.info(f"[DouYinCrawler.search] keyword:{keyword}, aweme_list:{aweme_list}")
+            # 重置页码为下一个关键词
+            progress.current_page = 0
+        
+        # 标记任务完成
+        await self._mark_progress_completed(progress)
 
     async def get_specified_awemes(self):
         """Get the information and comments of the specified post from URLs or IDs"""
         utils.logger.info("[DouYinCrawler.get_specified_awemes] Parsing video URLs...")
+        
+        # 先解析所有视频ID
+        all_aweme_ids = []
+        for video_url in config.DY_SPECIFIED_ID_LIST:
+            try:
+                video_info = parse_video_info_from_url(video_url)
+                if video_info.url_type == "short":
+                    # 短链接需要在运行时解析，先跳过
+                    all_aweme_ids.append(video_url)  # 暂存URL
+                else:
+                    all_aweme_ids.append(video_info.aweme_id)
+            except ValueError:
+                all_aweme_ids.append(video_url)
+        
+        # 初始化或恢复进度
+        progress = await self._init_or_resume_progress(
+            platform="dy",
+            crawler_type="detail",
+            note_ids=all_aweme_ids,
+        )
+        
         aweme_id_list = []
         for video_url in config.DY_SPECIFIED_ID_LIST:
             try:
@@ -190,10 +277,18 @@ class DouYinCrawler(AbstractCrawler):
                         utils.logger.error(f"[DouYinCrawler.get_specified_awemes] Failed to resolve short link: {video_url}")
                         continue
 
-                aweme_id_list.append(video_info.aweme_id)
-                utils.logger.info(f"[DouYinCrawler.get_specified_awemes] Parsed aweme ID: {video_info.aweme_id} from {video_url}")
+                aweme_id = video_info.aweme_id
+                
+                # 跳过已处理的视频
+                if progress.is_note_processed(aweme_id):
+                    utils.logger.debug(f"[DouYinCrawler.get_specified_awemes] Skip processed aweme: {aweme_id}")
+                    continue
+                
+                aweme_id_list.append(aweme_id)
+                utils.logger.info(f"[DouYinCrawler.get_specified_awemes] Parsed aweme ID: {aweme_id} from {video_url}")
             except ValueError as e:
                 utils.logger.error(f"[DouYinCrawler.get_specified_awemes] Failed to parse video URL: {e}")
+                progress.record_error(str(e))
                 continue
 
         semaphore = asyncio.Semaphore(config.MAX_CONCURRENCY_NUM)
@@ -201,9 +296,18 @@ class DouYinCrawler(AbstractCrawler):
         aweme_details = await asyncio.gather(*task_list)
         for aweme_detail in aweme_details:
             if aweme_detail is not None:
+                aweme_id = aweme_detail.get("aweme_id", "")
                 await douyin_store.update_douyin_aweme(aweme_item=aweme_detail)
                 await self.get_aweme_media(aweme_item=aweme_detail)
-        await self.batch_get_note_comments(aweme_id_list)
+                
+                # 标记视频已处理
+                progress.mark_note_processed(aweme_id)
+                await self._save_progress_if_needed(progress)
+        
+        await self.batch_get_note_comments(aweme_id_list, progress)
+        
+        # 标记任务完成
+        await self._mark_progress_completed(progress)
 
     async def get_aweme_detail(self, aweme_id: str, semaphore: asyncio.Semaphore) -> Any:
         """Get note detail"""
@@ -221,7 +325,7 @@ class DouYinCrawler(AbstractCrawler):
                 utils.logger.error(f"[DouYinCrawler.get_aweme_detail] have not fund note detail aweme_id:{aweme_id}, err: {ex}")
                 return None
 
-    async def batch_get_note_comments(self, aweme_list: List[str]) -> None:
+    async def batch_get_note_comments(self, aweme_list: List[str], progress: Optional["CrawlProgress"] = None) -> None:
         """
         Batch get note comments
         """
@@ -229,15 +333,19 @@ class DouYinCrawler(AbstractCrawler):
             utils.logger.info(f"[DouYinCrawler.batch_get_note_comments] Crawling comment mode is not enabled")
             return
 
+        # 过滤已处理评论的视频
+        if progress:
+            aweme_list = [aid for aid in aweme_list if not progress.is_comment_note_processed(aid)]
+
         task_list: List[Task] = []
         semaphore = asyncio.Semaphore(config.MAX_CONCURRENCY_NUM)
         for aweme_id in aweme_list:
-            task = asyncio.create_task(self.get_comments(aweme_id, semaphore), name=aweme_id)
+            task = asyncio.create_task(self.get_comments(aweme_id, semaphore, progress), name=aweme_id)
             task_list.append(task)
         if len(task_list) > 0:
             await asyncio.wait(task_list)
 
-    async def get_comments(self, aweme_id: str, semaphore: asyncio.Semaphore) -> None:
+    async def get_comments(self, aweme_id: str, semaphore: asyncio.Semaphore, progress: Optional["CrawlProgress"] = None) -> None:
         async with semaphore:
             try:
                 # 将关键词列表传递给 get_aweme_all_comments 方法
@@ -250,6 +358,13 @@ class DouYinCrawler(AbstractCrawler):
                     callback=douyin_store.batch_update_dy_aweme_comments,
                     max_count=config.CRAWLER_MAX_COMMENTS_COUNT_SINGLENOTES,
                 )
+                
+                # 标记评论已处理
+                if progress:
+                    progress.mark_comment_note_processed(aweme_id)
+                    progress.total_comments_crawled += 1
+                    await self._save_progress_if_needed(progress)
+                
                 # Sleep after fetching comments
                 await asyncio.sleep(crawl_interval)
                 utils.logger.info(f"[DouYinCrawler.get_comments] Sleeping for {crawl_interval} seconds after fetching comments for aweme {aweme_id}")
@@ -264,13 +379,25 @@ class DouYinCrawler(AbstractCrawler):
         utils.logger.info("[DouYinCrawler.get_creators_and_videos] Begin get douyin creators")
         utils.logger.info("[DouYinCrawler.get_creators_and_videos] Parsing creator URLs...")
 
-        for creator_url in config.DY_CREATOR_ID_LIST:
+        # 初始化或恢复进度
+        progress = await self._init_or_resume_progress(
+            platform="dy",
+            crawler_type="creator",
+            creator_ids=config.DY_CREATOR_ID_LIST,
+        )
+
+        # 从上次的创作者索引开始
+        for creator_idx in range(progress.current_creator_index, len(config.DY_CREATOR_ID_LIST)):
+            creator_url = config.DY_CREATOR_ID_LIST[creator_idx]
+            progress.current_creator_index = creator_idx
+            
             try:
                 creator_info_parsed = parse_creator_info_from_url(creator_url)
                 user_id = creator_info_parsed.sec_user_id
                 utils.logger.info(f"[DouYinCrawler.get_creators_and_videos] Parsed sec_user_id: {user_id} from {creator_url}")
             except ValueError as e:
                 utils.logger.error(f"[DouYinCrawler.get_creators_and_videos] Failed to parse creator URL: {e}")
+                progress.record_error(str(e))
                 continue
 
             creator_info: Dict = await self.dy_client.get_user_info(user_id)
@@ -280,8 +407,20 @@ class DouYinCrawler(AbstractCrawler):
             # Get all video information of the creator
             all_video_list = await self.dy_client.get_all_user_aweme_posts(sec_user_id=user_id, callback=self.fetch_creator_video_detail)
 
-            video_ids = [video_item.get("aweme_id") for video_item in all_video_list]
-            await self.batch_get_note_comments(video_ids)
+            video_ids = []
+            for video_item in all_video_list:
+                video_id = video_item.get("aweme_id")
+                # 跳过已处理的视频
+                if progress.is_note_processed(video_id):
+                    continue
+                video_ids.append(video_id)
+                progress.mark_note_processed(video_id)
+            
+            await self.batch_get_note_comments(video_ids, progress)
+            await self._save_progress_if_needed(progress, force=True)
+        
+        # 标记任务完成
+        await self._mark_progress_completed(progress)
 
     async def fetch_creator_video_detail(self, video_list: List[Dict]):
         """
@@ -378,6 +517,12 @@ class DouYinCrawler(AbstractCrawler):
 
     async def close(self) -> None:
         """Close browser context"""
+        # 保存进度
+        await self._save_progress_on_close()
+        
+        # 保存账号池状态
+        await self._save_account_pool_on_close()
+        
         # 如果使用CDP模式，需要特殊处理
         if self.cdp_manager:
             await self.cdp_manager.cleanup()

@@ -21,7 +21,10 @@
 import asyncio
 import os
 from asyncio import Task
-from typing import Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
+
+if TYPE_CHECKING:
+    from crawler.progress import CrawlProgress
 
 from playwright.async_api import (
     BrowserContext,
@@ -53,6 +56,7 @@ class TieBaCrawler(AbstractCrawler):
     cdp_manager: Optional[CDPBrowserManager]
 
     def __init__(self) -> None:
+        super().__init__()  # 初始化断点续爬相关属性
         self.index_url = "https://tieba.baidu.com"
         self.user_agent = utils.get_user_agent()
         self._page_extractor = TieBaExtractor()
@@ -64,8 +68,24 @@ class TieBaCrawler(AbstractCrawler):
         Returns:
 
         """
+        # 初始化进度管理器
+        self._init_progress_manager()
+        
+        # 初始化账号池
+        await self._init_account_pool("tieba")
+        
         playwright_proxy_format, httpx_proxy_format = None, None
-        if config.ENABLE_IP_PROXY:
+        
+        # 优先使用多账号模式的代理配置
+        if self._has_multi_account():
+            account = await self._get_next_account()
+            if account:
+                playwright_proxy_format, httpx_proxy_format = self._get_account_proxy()
+                if playwright_proxy_format:
+                    utils.logger.info(f"[BaiduTieBaCrawler] Using account proxy: {account.proxy_ip}")
+        
+        # 如果没有账号代理，使用全局代理池
+        if not httpx_proxy_format and config.ENABLE_IP_PROXY:
             utils.logger.info(
                 "[BaiduTieBaCrawler.start] Begin create ip proxy pool ..."
             )
@@ -115,12 +135,21 @@ class TieBaCrawler(AbstractCrawler):
 
             # Check login status and perform login if necessary
             if not await self.tieba_client.pong(browser_context=self.browser_context):
+                # 优先使用账号的Cookie
+                cookie_str = self._get_account_cookies() or config.COOKIES
+                login_type = config.LOGIN_TYPE
+                
+                # 如果有账号Cookie，使用cookie登录方式
+                if self._current_account and self._current_account.cookies:
+                    login_type = "cookie"
+                    utils.logger.info(f"[BaiduTieBaCrawler] Using account cookies for login")
+                
                 login_obj = BaiduTieBaLogin(
-                    login_type=config.LOGIN_TYPE,
+                    login_type=login_type,
                     login_phone="",  # your phone number
                     browser_context=self.browser_context,
                     context_page=self.context_page,
-                    cookie_str=config.COOKIES,
+                    cookie_str=cookie_str,
                 )
                 await login_obj.begin()
                 await self.tieba_client.update_cookies(browser_context=self.browser_context)
@@ -153,13 +182,29 @@ class TieBaCrawler(AbstractCrawler):
         tieba_limit_count = 10  # tieba limit page fixed value
         if config.CRAWLER_MAX_NOTES_COUNT < tieba_limit_count:
             config.CRAWLER_MAX_NOTES_COUNT = tieba_limit_count
+        
+        # 初始化或恢复进度
+        keywords_list = [kw.strip() for kw in config.KEYWORDS.split(",") if kw.strip()]
+        progress = await self._init_or_resume_progress(
+            platform="tieba",
+            crawler_type="search",
+            keywords=keywords_list,
+        )
+        
         start_page = config.START_PAGE
-        for keyword in config.KEYWORDS.split(","):
+        
+        # 从上次的关键词索引开始
+        for keyword_idx in range(progress.current_keyword_index, len(keywords_list)):
+            keyword = keywords_list[keyword_idx]
+            progress.current_keyword_index = keyword_idx
             source_keyword_var.set(keyword)
             utils.logger.info(
                 f"[BaiduTieBaCrawler.search] Current search keyword: {keyword}"
             )
-            page = 1
+            
+            # 从上次的页码开始
+            page = progress.current_page if keyword_idx == progress.current_keyword_index else 1
+            
             while (
                 page - start_page + 1
             ) * tieba_limit_count <= config.CRAWLER_MAX_NOTES_COUNT:
@@ -171,6 +216,8 @@ class TieBaCrawler(AbstractCrawler):
                     utils.logger.info(
                         f"[BaiduTieBaCrawler.search] search tieba keyword: {keyword}, page: {page}"
                     )
+                    progress.current_page = page
+                    
                     notes_list: List[TiebaNote] = (
                         await self.tieba_client.get_notes_by_keyword(
                             keyword=keyword,
@@ -189,7 +236,8 @@ class TieBaCrawler(AbstractCrawler):
                         f"[BaiduTieBaCrawler.search] Note list len: {len(notes_list)}"
                     )
                     await self.get_specified_notes(
-                        note_id_list=[note_detail.note_id for note_detail in notes_list]
+                        note_id_list=[note_detail.note_id for note_detail in notes_list],
+                        progress=progress
                     )
 
                     # Sleep after page navigation
@@ -201,7 +249,15 @@ class TieBaCrawler(AbstractCrawler):
                     utils.logger.error(
                         f"[BaiduTieBaCrawler.search] Search keywords error, current page: {page}, current keyword: {keyword}, err: {ex}"
                     )
+                    progress.record_error(str(ex))
+                    await self._save_progress_if_needed(progress, force=True)
                     break
+            
+            # 重置页码为下一个关键词
+            progress.current_page = 1
+        
+        # 标记任务完成
+        await self._mark_progress_completed(progress)
 
     async def get_specified_tieba_notes(self):
         """
@@ -241,20 +297,32 @@ class TieBaCrawler(AbstractCrawler):
                 page_number += tieba_limit_count
 
     async def get_specified_notes(
-        self, note_id_list: List[str] = config.TIEBA_SPECIFIED_ID_LIST
+        self, note_id_list: List[str] = config.TIEBA_SPECIFIED_ID_LIST, progress: Optional["CrawlProgress"] = None
     ):
         """
         Get the information and comments of the specified post
         Args:
             note_id_list:
+            progress:
 
         Returns:
 
         """
+        # 如果没有传入 progress，创建一个新的
+        if progress is None:
+            progress = await self._init_or_resume_progress(
+                platform="tieba",
+                crawler_type="detail",
+                note_ids=note_id_list,
+            )
+        
+        # 过滤已处理的帖子
+        filtered_note_ids = [nid for nid in note_id_list if not progress.is_note_processed(nid)]
+        
         semaphore = asyncio.Semaphore(config.MAX_CONCURRENCY_NUM)
         task_list = [
             self.get_note_detail_async_task(note_id=note_id, semaphore=semaphore)
-            for note_id in note_id_list
+            for note_id in filtered_note_ids
         ]
         note_details = await asyncio.gather(*task_list)
         note_details_model: List[TiebaNote] = []
@@ -262,7 +330,16 @@ class TieBaCrawler(AbstractCrawler):
             if note_detail is not None:
                 note_details_model.append(note_detail)
                 await tieba_store.update_tieba_note(note_detail)
-        await self.batch_get_note_comments(note_details_model)
+                
+                # 标记帖子已处理
+                progress.mark_note_processed(note_detail.note_id)
+                await self._save_progress_if_needed(progress)
+        
+        await self.batch_get_note_comments(note_details_model, progress)
+        
+        # 如果是独立调用（detail模式），标记完成
+        if progress.crawler_type == "detail":
+            await self._mark_progress_completed(progress)
 
     async def get_note_detail_async_task(
         self, note_id: str, semaphore: asyncio.Semaphore
@@ -304,11 +381,12 @@ class TieBaCrawler(AbstractCrawler):
                 )
                 return None
 
-    async def batch_get_note_comments(self, note_detail_list: List[TiebaNote]):
+    async def batch_get_note_comments(self, note_detail_list: List[TiebaNote], progress: Optional["CrawlProgress"] = None):
         """
         Batch get note comments
         Args:
             note_detail_list:
+            progress:
 
         Returns:
 
@@ -316,24 +394,29 @@ class TieBaCrawler(AbstractCrawler):
         if not config.ENABLE_GET_COMMENTS:
             return
 
+        # 过滤已处理评论的帖子
+        if progress:
+            note_detail_list = [nd for nd in note_detail_list if not progress.is_comment_note_processed(nd.note_id)]
+
         semaphore = asyncio.Semaphore(config.MAX_CONCURRENCY_NUM)
         task_list: List[Task] = []
         for note_detail in note_detail_list:
             task = asyncio.create_task(
-                self.get_comments_async_task(note_detail, semaphore),
+                self.get_comments_async_task(note_detail, semaphore, progress),
                 name=note_detail.note_id,
             )
             task_list.append(task)
         await asyncio.gather(*task_list)
 
     async def get_comments_async_task(
-        self, note_detail: TiebaNote, semaphore: asyncio.Semaphore
+        self, note_detail: TiebaNote, semaphore: asyncio.Semaphore, progress: Optional["CrawlProgress"] = None
     ):
         """
         Get comments async task
         Args:
             note_detail:
             semaphore:
+            progress:
 
         Returns:
 
@@ -353,6 +436,12 @@ class TieBaCrawler(AbstractCrawler):
                 callback=tieba_store.batch_update_tieba_note_comments,
                 max_count=config.CRAWLER_MAX_COMMENTS_COUNT_SINGLENOTES,
             )
+            
+            # 标记评论已处理
+            if progress:
+                progress.mark_comment_note_processed(note_detail.note_id)
+                progress.total_comments_crawled += 1
+                await self._save_progress_if_needed(progress)
 
     async def get_creators_and_notes(self) -> None:
         """
@@ -672,6 +761,12 @@ class TieBaCrawler(AbstractCrawler):
         Returns:
 
         """
+        # 保存进度
+        await self._save_progress_on_close()
+        
+        # 保存账号池状态
+        await self._save_account_pool_on_close()
+        
         # If using CDP mode, need special handling
         if self.cdp_manager:
             await self.cdp_manager.cleanup()
