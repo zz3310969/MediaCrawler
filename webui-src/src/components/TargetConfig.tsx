@@ -329,7 +329,7 @@ export function TargetConfig({
           </div>
         )}
 
-        {crawlerType === 'creator' && (
+        {(crawlerType === 'creator' || crawlerType === 'creator_vip') && (
           <div className="space-y-1">
             <Label className="text-xs">创作者 ID</Label>
             <p className="text-xs text-muted-foreground mb-1">
