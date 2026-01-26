@@ -32,13 +32,15 @@ export function LoginConfig({
   return (
     <Card className="h-full">
       <CardHeader className="pb-3">
-        <CardTitle className="flex items-center gap-2 text-lg">
+        <div className="flex items-center gap-2">
           <Key className="h-5 w-5 text-green-400" />
-          <span>登录配置</span>
-        </CardTitle>
-        <CardDescription className="text-xs">
-          登录方式配置
-        </CardDescription>
+          <div className="flex items-baseline gap-2">
+            <CardTitle className="text-base font-medium">登录配置</CardTitle>
+            <CardDescription className="text-xs text-muted-foreground/60">
+              登录方式配置
+            </CardDescription>
+          </div>
+        </div>
       </CardHeader>
 
       <CardContent className="space-y-3">

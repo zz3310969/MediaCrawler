@@ -134,13 +134,15 @@ export function TargetConfig({
   return (
     <Card className="h-full">
       <CardHeader className="pb-3">
-        <CardTitle className="flex items-center gap-2 text-lg">
+        <div className="flex items-center gap-2">
           <Globe className="h-5 w-5 text-blue-400" />
-          <span>目标配置</span>
-        </CardTitle>
-        <CardDescription className="text-xs">
-          平台、属性与搜索类型
-        </CardDescription>
+          <div className="flex items-baseline gap-2">
+            <CardTitle className="text-base font-medium">目标配置</CardTitle>
+            <CardDescription className="text-xs text-muted-foreground/60">
+              平台、属性与搜索类型
+            </CardDescription>
+          </div>
+        </div>
       </CardHeader>
 
       <CardContent className="space-y-3">

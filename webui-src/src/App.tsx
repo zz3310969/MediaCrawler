@@ -5,6 +5,7 @@ import { TargetConfig } from './components/TargetConfig'
 import { LoginConfig } from './components/LoginConfig'
 import { OutputConfig } from './components/OutputConfig'
 import { TerminalLog } from './components/TerminalLog'
+import { ThemeToggle } from './components/ThemeToggle'
 import { Button } from './components/ui/button'
 import { crawlerApi, type CrawlerStartRequest, type Platform, type LoginType, type CrawlerType, type SaveOption } from './api/crawler'
 
@@ -94,16 +95,16 @@ function MainApp() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950">
+    <div className="h-screen flex flex-col bg-gradient-to-br from-slate-50 via-slate-100 to-slate-50 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 overflow-hidden">
       {/* 顶部导航 */}
-      <header className="border-b border-slate-800 bg-slate-950/50 backdrop-blur">
-        <div className="container mx-auto px-6 py-4 flex items-center justify-between">
+      <header className="flex-shrink-0 border-b border-slate-200 dark:border-slate-800 bg-white/50 dark:bg-slate-950/50 backdrop-blur">
+        <div className="container mx-auto px-6 py-3 flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <h1 className="text-xl font-bold text-white flex items-center gap-3">
+            <h1 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-3">
               <span className="text-2xl">🕷️</span>
               <span>MediaCrawler</span>
             </h1>
-            <button className="px-3 py-1 text-xs border border-gray-700 rounded hover:bg-gray-800 text-gray-400">
+            <button className="px-3 py-1 text-xs border border-gray-300 dark:border-gray-700 rounded hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-400">
               ⭐ Star
             </button>
           </div>
@@ -117,17 +118,20 @@ function MainApp() {
           </div>
 
           <div className="flex items-center gap-3 text-sm text-gray-400">
+            <ThemeToggle />
             <span>🌐 中文</span>
-            <span>API: v1.0.0</span>
-            <span>本地 🟢</span>
+            <span className="text-green-400">API: v1.0.0</span>
+            <span className="flex items-center gap-1">
+              本地 <span className="w-2 h-2 bg-green-500 rounded-full"></span>
+            </span>
           </div>
         </div>
       </header>
 
       {/* 主内容区 */}
-      <main className="container mx-auto px-6 py-6">
+      <main className="flex-1 container mx-auto px-6 py-4 overflow-y-auto">
         {/* 三列配置卡片 */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
           {/* 目标配置 */}
           <TargetConfig
             platform={config.platform}
@@ -169,11 +173,11 @@ function MainApp() {
         </div>
 
         {/* 启动按钮 */}
-        <div className="mb-6">
+        <div className="mb-4">
           <Button
             onClick={handleStartStop}
             disabled={startMutation.isPending || stopMutation.isPending}
-            className="w-full h-14 text-lg font-medium bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 text-white shadow-lg shadow-cyan-500/20"
+            className="w-full h-12 text-lg font-medium bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 text-white shadow-lg shadow-cyan-500/20"
           >
             {isRunning ? (
               <>⏸ 停止爬虫</>
@@ -183,13 +187,15 @@ function MainApp() {
           </Button>
         </div>
 
-        {/* 终端日志 */}
-        <TerminalLog />
+        {/* 终端日志 - 自适应剩余高度 */}
+        <div className="pb-4">
+          <TerminalLog />
+        </div>
       </main>
 
       {/* 底部 */}
-      <footer className="border-t border-slate-800 bg-slate-950/50 backdrop-blur mt-8">
-        <div className="container mx-auto px-6 py-4 text-center text-slate-500 text-xs">
+      <footer className="flex-shrink-0 border-t border-slate-200 dark:border-slate-800 bg-white/50 dark:bg-slate-950/50 backdrop-blur">
+        <div className="container mx-auto px-6 py-2 text-center text-slate-400 dark:text-slate-500 text-xs">
           MediaCrawler © 2025 - 仅供学习研究使用
         </div>
       </footer>

@@ -40,13 +40,15 @@ export function OutputConfig({
   return (
     <Card className="h-full">
       <CardHeader className="pb-3">
-        <CardTitle className="flex items-center gap-2 text-lg">
+        <div className="flex items-center gap-2">
           <FileOutput className="h-5 w-5 text-purple-400" />
-          <span>输出配置</span>
-        </CardTitle>
-        <CardDescription className="text-xs">
-          爬取和后处理选项
-        </CardDescription>
+          <div className="flex items-baseline gap-2">
+            <CardTitle className="text-base font-medium">输出配置</CardTitle>
+            <CardDescription className="text-xs text-muted-foreground/60">
+              保存格式及后处理选项
+            </CardDescription>
+          </div>
+        </div>
       </CardHeader>
 
       <CardContent className="space-y-3">
