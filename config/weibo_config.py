@@ -60,17 +60,19 @@ ENABLE_VIP_POSTER_DOWNLOAD = True
 VIP_POSTER_SAVE_MODE = "oss"
 
 # ==================== 腾讯云 COS 配置 ====================
-# 腾讯云 COS SecretId
-COS_SECRET_ID = "REMOVED_SECRET_ID"
+import os
 
-# 腾讯云 COS SecretKey
-COS_SECRET_KEY = "REMOVED_SECRET_KEY"
+# 腾讯云 COS SecretId (请通过环境变量设置)
+COS_SECRET_ID = os.getenv("COS_SECRET_ID", "")
+
+# 腾讯云 COS SecretKey (请通过环境变量设置)
+COS_SECRET_KEY = os.getenv("COS_SECRET_KEY", "")
 
 # COS Region (例如: ap-shanghai, ap-beijing, ap-guangzhou)
-COS_REGION = "ap-shanghai"
+COS_REGION = os.getenv("COS_REGION", "ap-shanghai")
 
 # COS Bucket名称
-COS_BUCKET_NAME = "YOUR_BUCKET_NAME"
+COS_BUCKET_NAME = os.getenv("COS_BUCKET_NAME", "")
 
 # COS存储路径前缀 (例如: vip_posters/)
-COS_PATH_PREFIX = "vip_posters/"
+COS_PATH_PREFIX = os.getenv("COS_PATH_PREFIX", "vip_posters/")
