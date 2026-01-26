@@ -1,9 +1,10 @@
 // 终端风格日志查看器
 import { useEffect, useRef, useState } from 'react'
-import { FileText, Trash2, Maximize2 } from 'lucide-react'
+import { FileText, Trash2, Maximize2, Database } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { useWebSocket } from '@/hooks/useWebSocket'
+import { DataManager } from './DataManager'
 import type { LogEntry } from '@/api/crawler'
 
 const LOG_LEVEL_COLORS = {
@@ -28,6 +29,7 @@ export function TerminalLog() {
   const bottomRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const [showLogo, setShowLogo] = useState(true)
+  const [showDataManager, setShowDataManager] = useState(false)
 
   // WebSocket 连接
   const { isConnected } = useWebSocket({
@@ -52,57 +54,52 @@ export function TerminalLog() {
   }
 
   return (
-    <div className="bg-[#1a1d23] rounded-lg border border-gray-800 shadow-2xl overflow-hidden">
-      {/* macOS 风格顶栏 */}
-      <div className="bg-[#2d3139] border-b border-gray-800 px-4 py-2 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1.5">
-            <div className="w-3 h-3 rounded-full bg-[#ff5f56]"></div>
-            <div className="w-3 h-3 rounded-full bg-[#ffbd2e]"></div>
-            <div className="w-3 h-3 rounded-full bg-[#27c93f]"></div>
+    <>
+      <div className="bg-[#1a1d23] rounded-lg border border-gray-800 shadow-2xl overflow-hidden">
+        {/* macOS 风格顶栏 */}
+        <div className="bg-[#2d3139] border-b border-gray-800 px-4 py-2 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-1.5">
+              <div className="w-3 h-3 rounded-full bg-[#ff5f56]"></div>
+              <div className="w-3 h-3 rounded-full bg-[#ffbd2e]"></div>
+              <div className="w-3 h-3 rounded-full bg-[#27c93f]"></div>
+            </div>
+            <span className="text-sm text-gray-400 font-medium">系统控制台</span>
+            <Badge variant={isConnected ? 'default' : 'secondary'} className="text-xs">
+              {isConnected ? 'IDLE' : 'OFFLINE'}
+            </Badge>
           </div>
-          <span className="text-sm text-gray-400 font-medium">系统控制台</span>
-          <Badge variant={isConnected ? 'default' : 'secondary'} className="text-xs">
-            {isConnected ? 'IDLE' : 'OFFLINE'}
-          </Badge>
+          
+          <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 text-xs text-gray-400 hover:text-gray-200"
+            >
+              <FileText className="h-3 w-3 mr-1" />
+              查记录
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setShowDataManager(true)}
+              className="h-7 text-xs text-gray-400 hover:text-gray-200"
+            >
+              <Database className="h-3 w-3 mr-1" />
+              数据管理
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleClear}
+              disabled={logs.length === 0}
+              className="h-7 text-xs text-gray-400 hover:text-gray-200"
+            >
+              <Trash2 className="h-3 w-3 mr-1" />
+              清空
+            </Button>
+          </div>
         </div>
-        
-        <div className="flex items-center gap-2">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 text-xs text-gray-400 hover:text-gray-200"
-          >
-            <FileText className="h-3 w-3 mr-1" />
-            查记录
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 text-xs text-gray-400 hover:text-gray-200"
-          >
-            <FileText className="h-3 w-3 mr-1" />
-            数据管理
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={handleClear}
-            disabled={logs.length === 0}
-            className="h-7 text-xs text-gray-400 hover:text-gray-200"
-          >
-            <Trash2 className="h-3 w-3 mr-1" />
-            清空
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 text-xs text-gray-400 hover:text-gray-200"
-          >
-            <Maximize2 className="h-3 w-3" />
-          </Button>
-        </div>
-      </div>
 
       {/* 日志内容区域 */}
       <div 
@@ -143,6 +140,10 @@ export function TerminalLog() {
         <div ref={bottomRef} />
       </div>
     </div>
+
+    {/* 数据管理弹窗 */}
+    <DataManager open={showDataManager} onOpenChange={setShowDataManager} />
+    </>
   )
 }
 

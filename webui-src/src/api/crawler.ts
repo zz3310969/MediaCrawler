@@ -56,6 +56,16 @@ export interface ConfigOptions {
   save_options: ConfigOption[]
 }
 
+// 数据文件类型
+export interface DataFile {
+  name: string
+  path: string
+  size: number
+  modified_at: number
+  record_count: number | null
+  type: string
+}
+
 // API 方法
 export const crawlerApi = {
   // 启动爬虫
@@ -81,5 +91,18 @@ export const crawlerApi = {
   // 获取配置选项
   getConfigOptions: () => 
     client.get<ConfigOptions>('/api/config/options'),
+  
+  // 获取数据文件列表
+  getDataFiles: (platform?: string, fileType?: string) => {
+    const params = new URLSearchParams()
+    if (platform) params.append('platform', platform)
+    if (fileType) params.append('file_type', fileType)
+    return client.get<{ files: DataFile[] }>(`/api/data/files?${params.toString()}`)
+  },
+  
+  // 下载数据文件
+  downloadFile: (filePath: string) => {
+    return `/api/data/download/${filePath}`
+  },
 }
 

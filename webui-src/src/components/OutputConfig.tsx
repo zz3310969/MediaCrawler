@@ -68,7 +68,10 @@ export function OutputConfig({
 
         {/* 爬取选项 */}
         <div className="space-y-3 pt-2">
-          <div className="flex items-center justify-between py-2 px-3 bg-secondary/50 rounded-md">
+          <label
+            htmlFor="enable-comments"
+            className="flex items-center justify-between py-2 px-3 bg-secondary/50 rounded-md cursor-pointer hover:bg-secondary/70 transition-colors"
+          >
             <div className="flex items-center gap-2">
               <input
                 type="checkbox"
@@ -76,15 +79,16 @@ export function OutputConfig({
                 checked={enableComments}
                 onChange={(e) => onEnableCommentsChange(e.target.checked)}
                 disabled={disabled}
-                className="w-4 h-4 rounded border-gray-600 bg-gray-700"
+                className="w-4 h-4 rounded border-gray-600 bg-gray-700 cursor-pointer"
               />
-              <Label htmlFor="enable-comments" className="text-sm cursor-pointer">
-                评论抓取
-              </Label>
+              <span className="text-sm">评论抓取</span>
             </div>
-          </div>
+          </label>
 
-          <div className="flex items-center justify-between py-2 px-3 bg-secondary/50 rounded-md">
+          <label
+            htmlFor="enable-sub-comments"
+            className="flex items-center justify-between py-2 px-3 bg-secondary/50 rounded-md cursor-pointer hover:bg-secondary/70 transition-colors"
+          >
             <div className="flex items-center gap-2">
               <input
                 type="checkbox"
@@ -92,15 +96,16 @@ export function OutputConfig({
                 checked={enableSubComments}
                 onChange={(e) => onEnableSubCommentsChange(e.target.checked)}
                 disabled={disabled}
-                className="w-4 h-4 rounded border-gray-600 bg-gray-700"
+                className="w-4 h-4 rounded border-gray-600 bg-gray-700 cursor-pointer"
               />
-              <Label htmlFor="enable-sub-comments" className="text-sm cursor-pointer">
-                子评论
-              </Label>
+              <span className="text-sm">子评论</span>
             </div>
-          </div>
+          </label>
 
-          <div className="flex items-center justify-between py-2 px-3 bg-secondary/50 rounded-md">
+          <label
+            htmlFor="headless"
+            className="flex items-center justify-between py-2 px-3 bg-secondary/50 rounded-md cursor-pointer hover:bg-secondary/70 transition-colors"
+          >
             <div className="flex items-center gap-2">
               <input
                 type="checkbox"
@@ -108,13 +113,11 @@ export function OutputConfig({
                 checked={headless}
                 onChange={(e) => onHeadlessChange(e.target.checked)}
                 disabled={disabled}
-                className="w-4 h-4 rounded border-gray-600 bg-gray-700"
+                className="w-4 h-4 rounded border-gray-600 bg-gray-700 cursor-pointer"
               />
-              <Label htmlFor="headless" className="text-sm cursor-pointer">
-                无头模式
-              </Label>
+              <span className="text-sm">无头模式</span>
             </div>
-          </div>
+          </label>
         </div>
       </CardContent>
     </Card>
