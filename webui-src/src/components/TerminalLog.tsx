@@ -1,11 +1,12 @@
 // 终端风格日志查看器
 import { useEffect, useRef, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { FileText, Trash2, Maximize2, Database } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { useWebSocket } from '@/hooks/useWebSocket'
 import { DataManager } from './DataManager'
-import type { LogEntry } from '@/api/crawler'
+import { crawlerApi, type LogEntry } from '@/api/crawler'
 
 const LOG_LEVEL_COLORS = {
   info: 'text-blue-400',
@@ -31,6 +32,13 @@ export function TerminalLog() {
   const [showLogo, setShowLogo] = useState(true)
   const [showDataManager, setShowDataManager] = useState(false)
 
+  // 查询爬虫状态
+  const { data: status } = useQuery({
+    queryKey: ['crawler-status'],
+    queryFn: crawlerApi.getStatus,
+    refetchInterval: 1000, // 每秒刷新
+  })
+
   // WebSocket 连接
   const { isConnected } = useWebSocket({
     url: '/ws/logs',
@@ -39,6 +47,24 @@ export function TerminalLog() {
       setShowLogo(false)
     },
   })
+
+  // 获取状态显示文本和样式
+  const getStatusDisplay = () => {
+    if (!isConnected) {
+      return { text: 'OFFLINE', variant: 'secondary' as const }
+    }
+    
+    const statusMap = {
+      'idle': { text: 'IDLE', variant: 'secondary' as const },
+      'running': { text: 'RUNNING', variant: 'default' as const },
+      'stopping': { text: 'STOPPING', variant: 'secondary' as const },
+      'error': { text: 'ERROR', variant: 'destructive' as const },
+    }
+    
+    return statusMap[status?.status || 'idle'] || statusMap.idle
+  }
+
+  const statusDisplay = getStatusDisplay()
 
   // 自动滚动到底部
   useEffect(() => {
@@ -65,20 +91,16 @@ export function TerminalLog() {
               <div className="w-3 h-3 rounded-full bg-[#27c93f]"></div>
             </div>
             <span className="text-sm text-gray-400 font-medium">系统控制台</span>
-            <Badge variant={isConnected ? 'default' : 'secondary'} className="text-xs">
-              {isConnected ? 'IDLE' : 'OFFLINE'}
+            <Badge variant={statusDisplay.variant} className="text-xs">
+              {statusDisplay.text}
             </Badge>
           </div>
           
           <div className="flex items-center gap-2">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 text-xs text-gray-400 hover:text-gray-200"
-            >
-              <FileText className="h-3 w-3 mr-1" />
-              查记录
-            </Button>
+            <div className="flex items-center gap-1 px-2 py-1 text-xs text-gray-400">
+              <FileText className="h-3 w-3" />
+              <span>{logs.length} 条记录</span>
+            </div>
             <Button
               variant="ghost"
               size="sm"
