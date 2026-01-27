@@ -1,31 +1,22 @@
 import React, { useState } from 'react'
 import { 
   Search, User, FileText, BookOpen, 
-  Play, Square, RefreshCw, Download, 
-  LayoutGrid, List, Filter, Eye, ThumbsUp, MessageCircle, PlusCircle, CheckCircle
+  Play, Square, RefreshCw, Eye,
+  LayoutGrid, List, PlusCircle, CheckCircle, BarChart2
 } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { crawlerApi } from '@/api/crawler'
 import { useCrawlerConfig } from '@/hooks/useCrawlerConfig'
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Switch } from '@/components/ui/switch'
 import { Badge } from '@/components/ui/badge'
-import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar'
 import { toast } from '@/components/ui/toast'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
 import {
   Dialog,
   DialogContent,
@@ -35,26 +26,27 @@ import {
 } from "@/components/ui/dialog"
 import { LoginConfig } from './LoginConfig'
 import { TerminalLog } from './TerminalLog'
-
+import { WeChatDataList } from './WeChatDataList'
+import { WeChatAnalysis } from './WeChatAnalysis'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 
 // 模拟数据类型
-interface Article {
-  id: string
-  title: string
-  account: string
-  readCount: number
-  likeCount: number
-  commentCount: number
-  pubDate: string
-  url: string
-}
+// interface Article {
+//   id: string
+//   title: string
+//   account: string
+//   readCount: number
+//   likeCount: number
+//   commentCount: number
+//   pubDate: string
+//   url: string
+// }
 
 // 模拟数据
-const MOCK_DATA: Article[] = [
-  { id: '1', title: '2025年人工智能发展趋势报告', account: 'AI前线', readCount: 100000, likeCount: 2345, commentCount: 120, pubDate: '2025-01-27', url: '#' },
-  { id: '2', title: 'Python 3.13 新特性解析', account: 'Python开发者', readCount: 45000, likeCount: 890, commentCount: 45, pubDate: '2025-01-26', url: '#' },
-]
+// const MOCK_DATA: Article[] = [
+//   { id: '1', title: '2025年人工智能发展趋势报告', account: 'AI前线', readCount: 100000, likeCount: 2345, commentCount: 120, pubDate: '2025-01-27', url: '#' },
+//   { id: '2', title: 'Python 3.13 新特性解析', account: 'Python开发者', readCount: 45000, likeCount: 890, commentCount: 45, pubDate: '2025-01-26', url: '#' },
+// ]
 
 export function WeChatDashboard() {
   const [activeTab, setActiveTab] = useState('data')
@@ -476,34 +468,48 @@ export function WeChatDashboard() {
         </Card>
       </div>
 
-      {/* 右侧工作区 Workspace (保持不变或简化显示) */}
-      <div className="flex-1 flex flex-col min-w-0">
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="h-full flex flex-col">
-          <div className="flex items-center justify-between mb-4">
-            <TabsList className="bg-white dark:bg-slate-900 border shadow-sm">
-              <TabsTrigger value="data" className="gap-2">
-                <LayoutGrid className="h-4 w-4" /> 数据浏览
+      {/* 右侧工作区 Workspace */}
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="h-full flex flex-col overflow-hidden">
+          {/* Tab 头部 - 固定 */}
+          <div className="flex-shrink-0 flex items-center justify-between mb-3">
+            <TabsList className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-sm p-1 h-10">
+              <TabsTrigger 
+                value="data" 
+                className="gap-2 px-4 data-[state=active]:bg-green-50 data-[state=active]:text-green-700 dark:data-[state=active]:bg-green-950/30 dark:data-[state=active]:text-green-400"
+              >
+                <LayoutGrid className="h-4 w-4" /> 数据管理
               </TabsTrigger>
-              <TabsTrigger value="log" className="gap-2">
+              <TabsTrigger 
+                value="analysis" 
+                className="gap-2 px-4 data-[state=active]:bg-green-50 data-[state=active]:text-green-700 dark:data-[state=active]:bg-green-950/30 dark:data-[state=active]:text-green-400"
+              >
+                <BarChart2 className="h-4 w-4" /> 统计分析
+              </TabsTrigger>
+              <TabsTrigger 
+                value="log" 
+                className="gap-2 px-4 data-[state=active]:bg-green-50 data-[state=active]:text-green-700 dark:data-[state=active]:bg-green-950/30 dark:data-[state=active]:text-green-400"
+              >
                 <List className="h-4 w-4" /> 运行日志
               </TabsTrigger>
             </TabsList>
           </div>
 
-          <TabsContent value="data" className="flex-1 min-h-0 mt-0">
-            <Card className="h-full flex flex-col border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
-                <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
-                    <LayoutGrid className="h-12 w-12 mb-4 opacity-20" />
-                    <p>数据预览功能开发中...</p>
-                    <p className="text-sm mt-2">目前请在"运行日志"中查看采集进度</p>
-                </div>
-            </Card>
+          {/* Tab 内容区 - 可滚动 */}
+          <TabsContent value="data" className="flex-1 min-h-0 mt-0 overflow-hidden">
+            <WeChatDataList />
           </TabsContent>
 
-          <TabsContent value="log" className="flex-1 min-h-0 mt-0">
-             <Card className="h-full border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden flex flex-col">
-                <TerminalLog />
-             </Card>
+          <TabsContent value="analysis" className="flex-1 min-h-0 mt-0 overflow-hidden">
+            <div className="h-full overflow-y-auto scrollbar-thin scrollbar-thumb-slate-300 dark:scrollbar-thumb-slate-600 scrollbar-track-transparent pr-2">
+              <WeChatAnalysis />
+            </div>
+          </TabsContent>
+
+          <TabsContent value="log" className="flex-1 min-h-0 mt-0 overflow-hidden">
+            <Card className="h-full border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden flex flex-col">
+              <TerminalLog />
+            </Card>
           </TabsContent>
         </Tabs>
       </div>

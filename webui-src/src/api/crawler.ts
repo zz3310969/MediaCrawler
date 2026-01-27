@@ -110,6 +110,47 @@ export interface DataFile {
   type: string
 }
 
+// 微信文章类型
+export interface WeChatArticleItem {
+  id: number
+  article_id: string
+  title: string
+  account_name: string
+  read_num: number
+  like_num: number
+  comment_count: number
+  create_time: number
+  link: string
+  cover?: string
+}
+
+// 微信文章列表响应
+export interface WeChatArticleListResponse {
+  articles: WeChatArticleItem[]
+  total: number
+  page: number
+  page_size: number
+}
+
+// 微信统计数据
+export interface WeChatStats {
+  total_articles: number
+  total_reads: number
+  total_likes: number
+  total_accounts: number
+  today_articles: number
+  today_reads: number
+}
+
+// 热门文章
+export interface WeChatTopArticle {
+  id: number
+  title: string
+  account_name: string
+  read_num: number
+  create_time: number
+}
+
 // API 方法
 export const crawlerApi = {
   // 启动爬虫
@@ -156,6 +197,35 @@ export const crawlerApi = {
       cookies, 
       token 
     })
+  },
+  
+  // 获取微信文章列表
+  getWeChatArticles: (params: {
+    page?: number
+    page_size?: number
+    search?: string
+    time_range?: 'today' | 'week' | 'month' | 'all'
+    order_by?: 'create_time' | 'read_num' | 'like_num'
+    order_dir?: 'asc' | 'desc'
+  } = {}) => {
+    const queryParams = new URLSearchParams()
+    if (params.page) queryParams.append('page', params.page.toString())
+    if (params.page_size) queryParams.append('page_size', params.page_size.toString())
+    if (params.search) queryParams.append('search', params.search)
+    if (params.time_range) queryParams.append('time_range', params.time_range)
+    if (params.order_by) queryParams.append('order_by', params.order_by)
+    if (params.order_dir) queryParams.append('order_dir', params.order_dir)
+    return client.get<WeChatArticleListResponse>(`/api/wechat/articles?${queryParams.toString()}`)
+  },
+  
+  // 获取微信统计数据
+  getWeChatStats: () => {
+    return client.get<WeChatStats>('/api/wechat/stats')
+  },
+  
+  // 获取热门文章
+  getWeChatTopArticles: (limit = 5) => {
+    return client.get<WeChatTopArticle[]>(`/api/wechat/top_articles?limit=${limit}`)
   },
 }
 
