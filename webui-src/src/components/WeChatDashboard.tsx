@@ -90,7 +90,7 @@ export function WeChatDashboard() {
     }
   }, [status?.new_cookies, status?.new_token, status?.status, config.cookies, config.wechat_token, isRunning, updateConfig])
   
-  // 启动爬虫 Mutation
+  // 启动爬虫 Mutation（用于登录）
   const startMutation = useMutation({
     mutationFn: crawlerApi.start,
     onSuccess: () => {
@@ -102,6 +102,62 @@ export function WeChatDashboard() {
       toast.error(`启动失败: ${error.message}`)
     },
   })
+
+  // 启动采集 Mutation
+  const startCrawlMutation = useMutation({
+    mutationFn: crawlerApi.start,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['crawler-status'] })
+      setIsRunning(true)
+      toast.success('采集任务已启动')
+    },
+    onError: (error: Error) => {
+      toast.error(`启动失败: ${error.message}`)
+    },
+  })
+
+  // 停止爬虫 Mutation
+  const stopMutation = useMutation({
+    mutationFn: crawlerApi.stop,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['crawler-status'] })
+      setIsRunning(false)
+      toast.success('采集任务已停止')
+    },
+    onError: (error: Error) => {
+      toast.error(`停止失败: ${error.message}`)
+    },
+  })
+
+  // 处理开始/停止采集
+  const handleStartStopCrawl = () => {
+    if (isRunning) {
+      // 停止采集
+      stopMutation.mutate()
+    } else {
+      // 检查是否已登录
+      if (!config.cookies || !config.wechat_token) {
+        toast.error('请先登录微信公众号平台')
+        return
+      }
+      
+      // 根据当前模式构建配置
+      const crawlerType = mode === 'search' ? 'search' : 
+                          mode === 'account' ? 'creator' :
+                          mode === 'article' ? 'detail' : 'album'
+      
+      const crawlConfig = {
+        ...config,
+        platform: 'wechat' as const,
+        login_type: 'cookie' as const, // 使用已保存的 Cookie 登录
+        crawler_type: crawlerType as 'search' | 'detail' | 'creator' | 'album',
+        headless: true, // 采集时可以使用无头模式
+        login_only: false, // 需要进行数据采集
+      }
+      
+      startCrawlMutation.mutate(crawlConfig)
+    }
+  }
 
   // 启动登录流程
   const handleStartLogin = () => {
@@ -403,7 +459,8 @@ export function WeChatDashboard() {
                   ? 'bg-red-500 hover:bg-red-600 shadow-red-500/20' 
                   : 'bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 shadow-green-500/20'
               }`}
-              onClick={() => setIsRunning(!isRunning)}
+              onClick={handleStartStopCrawl}
+              disabled={startCrawlMutation.isPending || stopMutation.isPending}
             >
               {isRunning ? (
                 <>

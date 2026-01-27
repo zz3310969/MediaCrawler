@@ -420,6 +420,9 @@ async def parse_cmd(argv: Optional[Sequence[str]] = None):
                 config.WEIBO_CREATOR_ID_LIST = creator_id_list
             elif platform == PlatformEnum.KUAISHOU:
                 config.KS_CREATOR_ID_LIST = creator_id_list
+            elif platform == PlatformEnum.WECHAT:
+                from config import wechat_config
+                wechat_config.WECHAT_ACCOUNT_IDS = creator_id_list
 
         # Set VIP creator ID list for creator_vip mode (Weibo only)
         if vip_creator_id_list:

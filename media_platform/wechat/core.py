@@ -1134,7 +1134,7 @@ class WeChatCrawler(AbstractCrawler):
         utils.logger.info("[WeChatCrawler.get_creators_articles] Getting creators articles...")
         
         # 从配置读取公众号ID列表
-        account_ids = getattr(config, "WECHAT_ACCOUNT_IDS", [])
+        account_ids = getattr(wechat_config, "WECHAT_ACCOUNT_IDS", [])
         
         if not account_ids:
             utils.logger.warning("[WeChatCrawler.get_creators_articles] No account IDs configured")
@@ -1183,8 +1183,8 @@ class WeChatCrawler(AbstractCrawler):
             return
         
         # 模式2: 获取指定公众号的所有合集
-        account_ids = getattr(config, "WECHAT_ACCOUNT_IDS", [])
-        crawl_all_albums = getattr(config, "ENABLE_CRAWL_ALL_ALBUMS", False)
+        account_ids = getattr(wechat_config, "WECHAT_ACCOUNT_IDS", [])
+        crawl_all_albums = getattr(wechat_config, "ENABLE_CRAWL_ALL_ALBUMS", False)
         
         if not account_ids:
             utils.logger.warning("[WeChatCrawler.get_album_articles] No album or account IDs configured")
