@@ -99,6 +99,9 @@ class CrawlerStartRequest(BaseModel):
     wechat_credentials_key: str = ""  # 微信凭证 key
     wechat_credentials_pass_ticket: str = ""  # 微信凭证 pass_ticket
     wechat_token: str = ""  # 微信后台 token
+    
+    # 仅登录模式
+    login_only: bool = False  # 是否只登录获取Cookie/Token，不进行数据爬取
 
 
 class CrawlerStatusResponse(BaseModel):

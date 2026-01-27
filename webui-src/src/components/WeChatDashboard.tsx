@@ -62,6 +62,33 @@ export function WeChatDashboard() {
   const [mode, setMode] = useState('search')
   const { config, updateConfig } = useCrawlerConfig()
   const queryClient = useQueryClient()
+  const [loginDialogOpen, setLoginDialogOpen] = useState(false)
+  
+  // 查询爬虫状态，用于监听登录完成
+  const { data: statusResponse } = useQuery({
+    queryKey: ['crawler-status'],
+    queryFn: crawlerApi.getStatus,
+    refetchInterval: isRunning ? 1000 : 5000, // 运行时更频繁轮询
+  })
+  
+  const status = statusResponse?.data
+  
+  // 监听登录状态变化，自动更新 Cookie 和 Token
+  React.useEffect(() => {
+    if (status?.new_cookies && status.new_cookies !== config.cookies) {
+      toast.success('登录成功！Cookie 已自动保存')
+      updateConfig({ cookies: status.new_cookies })
+    }
+    if (status?.new_token && status.new_token !== config.wechat_token) {
+      toast.success('Token 已自动保存')
+      updateConfig({ wechat_token: status.new_token })
+    }
+    // 如果状态变为 idle 且之前是 running，说明登录流程结束
+    if (status?.status === 'idle' && isRunning) {
+      setIsRunning(false)
+      setLoginDialogOpen(false) // 自动关闭登录对话框
+    }
+  }, [status?.new_cookies, status?.new_token, status?.status, config.cookies, config.wechat_token, isRunning, updateConfig])
   
   // 启动爬虫 Mutation
   const startMutation = useMutation({
@@ -83,8 +110,9 @@ export function WeChatDashboard() {
       ...config,
       platform: 'wechat' as const,
       login_type: 'mp_qrcode' as const,
-      crawler_type: 'search' as const, // 登录时默认用 search 模式占位，实际只为了拿 Cookie
+      crawler_type: 'search' as const, // 登录时默认用 search 模式占位
       headless: false, // 关键：强制有头模式
+      login_only: true, // 关键：只登录获取 Cookie/Token，不进行数据爬取
     }
     startMutation.mutate(loginConfig)
   }
@@ -165,7 +193,7 @@ export function WeChatDashboard() {
                      <CheckCircle className="h-3 w-3 mr-1" /> 已登录
                   </Badge>
               ) : (
-                  <Dialog>
+                  <Dialog open={loginDialogOpen} onOpenChange={setLoginDialogOpen}>
                     <DialogTrigger asChild>
                       <Badge variant="outline" className="text-xs bg-white dark:bg-slate-800 text-slate-500 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-900">
                          未登录 (点击登录)

@@ -352,6 +352,15 @@ async def parse_cmd(argv: Optional[Sequence[str]] = None):
                 rich_help_panel="WeChat Configuration",
             ),
         ] = "",
+        login_only: Annotated[
+            str,
+            typer.Option(
+                "--login_only",
+                help="Only perform login to get cookies/token, do not crawl data. Supports yes/true/t/y/1 or no/false/f/n/0",
+                rich_help_panel="Runtime Configuration",
+                show_default=True,
+            ),
+        ] = "false",
     ) -> SimpleNamespace:
         """MediaCrawler 命令行入口"""
 
@@ -382,6 +391,10 @@ async def parse_cmd(argv: Optional[Sequence[str]] = None):
         # 增量爬取配置
         config.ENABLE_INCREMENTAL_CRAWL = enable_incremental_crawl
         config.CREATOR_EARLY_STOP_THRESHOLD = incremental_threshold
+        
+        # 仅登录模式
+        enable_login_only = _to_bool(login_only)
+        config.LOGIN_ONLY = enable_login_only
 
         # Set platform-specific ID lists for detail/creator mode
         if specified_id_list:
@@ -460,6 +473,8 @@ async def parse_cmd(argv: Optional[Sequence[str]] = None):
             wechat_enable_export=enable_wechat_export,
             wechat_export_format=wechat_export_format,
             wechat_album_ids=wechat_album_ids,
+            # 仅登录模式
+            login_only=enable_login_only,
         )
 
     command = typer.main.get_command(app)

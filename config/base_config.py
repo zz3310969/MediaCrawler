@@ -40,6 +40,11 @@ IP_PROXY_PROVIDER_NAME = "kuaidaili"  # kuaidaili | wandouhttp
 # 抖音如果一直提示失败，打开浏览器看下是否扫码登录之后出现了手机号验证，如果出现了手动过一下再试。
 HEADLESS = False
 
+# 仅登录模式
+# 设置为True时，只进行登录获取Cookie/Token，不会进行数据爬取
+# 适用于 WebUI 的登录功能
+LOGIN_ONLY = False
+
 # 是否保存登录状态
 SAVE_LOGIN_STATE = True
 

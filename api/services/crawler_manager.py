@@ -268,6 +268,10 @@ class CrawlerManager:
                 cmd.extend(["--wechat_key", config.wechat_credentials_key])
             if config.wechat_credentials_pass_ticket:
                 cmd.extend(["--wechat_pass_ticket", config.wechat_credentials_pass_ticket])
+        
+        # 仅登录模式
+        if config.login_only:
+            cmd.extend(["--login_only", "true"])
 
         return cmd
 

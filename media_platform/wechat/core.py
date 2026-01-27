@@ -139,6 +139,13 @@ class WeChatCrawler(AbstractCrawler):
                 if token:
                     self.wechat_client.set_token(token)
             
+            # 检查是否为仅登录模式
+            login_only = getattr(config, 'LOGIN_ONLY', False)
+            if login_only:
+                utils.logger.info("[WeChatCrawler] Login only mode - skipping crawling")
+                utils.logger.info("[WeChatCrawler] Cookies and Token have been captured successfully!")
+                return
+            
             crawler_type_var.set(config.CRAWLER_TYPE)
             
             # 根据爬取类型执行不同的操作
@@ -1378,6 +1385,13 @@ class WeChatCrawler(AbstractCrawler):
             if token:
                 utils.logger.info(f"[WeChatCrawler._check_existing_login] Found token in URL, already logged in")
                 self.wechat_client.set_token(token)
+                
+                # 输出 Cookie 和 Token 供 WebUI 捕获
+                cookies = await self.browser_context.cookies()
+                cookie_str, _ = utils.convert_cookies(cookies)
+                print(f"[COOKIE_UPDATE] {cookie_str}")
+                print(f"[TOKEN_UPDATE] {token}")
+                
                 return True
             
             # 如果URL中没有token，检查cookies是否包含登录信息
@@ -1405,6 +1419,13 @@ class WeChatCrawler(AbstractCrawler):
                     utils.logger.info(f"[WeChatCrawler._check_existing_login] Token extracted after navigation")
                     self.wechat_client.set_token(token)
                     await self.wechat_client.update_cookies(browser_context=self.browser_context)
+                    
+                    # 输出 Cookie 和 Token 供 WebUI 捕获
+                    cookies = await self.browser_context.cookies()
+                    cookie_str, _ = utils.convert_cookies(cookies)
+                    print(f"[COOKIE_UPDATE] {cookie_str}")
+                    print(f"[TOKEN_UPDATE] {token}")
+                    
                     return True
             
             utils.logger.info("[WeChatCrawler._check_existing_login] Not logged in, need to login")
