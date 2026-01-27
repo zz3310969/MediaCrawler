@@ -142,6 +142,13 @@ export interface WeChatStats {
   today_reads: number
 }
 
+// 公众号列表项
+export interface WeChatAccountItem {
+  fakeid: string
+  account_name: string
+  article_count: number
+}
+
 // 热门文章
 export interface WeChatTopArticle {
   id: number
@@ -207,6 +214,7 @@ export const crawlerApi = {
     time_range?: 'today' | 'week' | 'month' | 'all'
     order_by?: 'create_time' | 'read_num' | 'like_num'
     order_dir?: 'asc' | 'desc'
+    account_ids?: string  // 公众号ID列表，逗号分隔
   } = {}) => {
     const queryParams = new URLSearchParams()
     if (params.page) queryParams.append('page', params.page.toString())
@@ -215,7 +223,13 @@ export const crawlerApi = {
     if (params.time_range) queryParams.append('time_range', params.time_range)
     if (params.order_by) queryParams.append('order_by', params.order_by)
     if (params.order_dir) queryParams.append('order_dir', params.order_dir)
+    if (params.account_ids) queryParams.append('account_ids', params.account_ids)
     return client.get<WeChatArticleListResponse>(`/api/wechat/articles?${queryParams.toString()}`)
+  },
+  
+  // 获取公众号列表
+  getWeChatAccounts: () => {
+    return client.get<WeChatAccountItem[]>('/api/wechat/accounts')
   },
   
   // 获取微信统计数据

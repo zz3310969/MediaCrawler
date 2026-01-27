@@ -58,6 +58,55 @@ class TopArticleItem(BaseModel):
     read_num: int
     create_time: int
 
+
+class AccountItem(BaseModel):
+    """公众号列表项"""
+    fakeid: str
+    account_name: str
+    article_count: int
+
+
+@router.get("/accounts", response_model=List[AccountItem])
+async def get_accounts():
+    """
+    获取所有已采集的公众号列表（去重）
+    """
+    try:
+        from database.db_session import get_session
+        from database.models import WeChatArticle
+        from sqlalchemy import select, func, distinct
+        
+        async with get_session() as session:
+            # 获取所有公众号及其文章数量
+            query = select(
+                WeChatArticle.fakeid,
+                WeChatArticle.account_name,
+                func.count(WeChatArticle.id).label('article_count')
+            ).group_by(
+                WeChatArticle.fakeid,
+                WeChatArticle.account_name
+            ).order_by(
+                func.count(WeChatArticle.id).desc()
+            )
+            
+            result = await session.execute(query)
+            accounts = result.all()
+            
+            return [
+                AccountItem(
+                    fakeid=row.fakeid or "",
+                    account_name=row.account_name or "未知公众号",
+                    article_count=row.article_count or 0,
+                )
+                for row in accounts
+                if row.fakeid  # 过滤掉空的 fakeid
+            ]
+            
+    except Exception as e:
+        utils.logger.error(f"[WeChatAPI] Get accounts failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/search_account")
 async def search_account(request: WeChatSearchRequest):
     """
@@ -125,6 +174,7 @@ async def get_articles(
     time_range: Optional[str] = Query(None, description="时间范围: today, week, month, all"),
     order_by: Optional[str] = Query("create_time", description="排序字段: create_time, read_num, like_num"),
     order_dir: Optional[str] = Query("desc", description="排序方向: asc, desc"),
+    account_ids: Optional[str] = Query(None, description="公众号ID列表，逗号分隔"),
 ):
     """
     获取微信文章列表（分页）
@@ -138,6 +188,14 @@ async def get_articles(
             # 构建基础查询
             query = select(WeChatArticle)
             count_query = select(func.count(WeChatArticle.id))
+            
+            # 公众号过滤
+            if account_ids:
+                fakeid_list = [fid.strip() for fid in account_ids.split(",") if fid.strip()]
+                if fakeid_list:
+                    account_filter = WeChatArticle.fakeid.in_(fakeid_list)
+                    query = query.where(account_filter)
+                    count_query = count_query.where(account_filter)
             
             # 搜索条件
             if search:

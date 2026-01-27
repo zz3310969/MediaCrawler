@@ -1,11 +1,11 @@
-import React, { useState, useCallback } from 'react'
-import { Search, Download, RefreshCw, Eye, ThumbsUp, MessageCircle, Calendar, ExternalLink, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react'
+import React, { useState, useCallback, useRef, useEffect } from 'react'
+import { Search, Download, RefreshCw, Eye, ThumbsUp, MessageCircle, Calendar, ExternalLink, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ChevronDown, X, Check, User } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Select } from '@/components/ui/select'
 import { useQuery } from '@tanstack/react-query'
-import { crawlerApi, WeChatArticleItem } from '@/api/crawler'
+import { crawlerApi, WeChatArticleItem, WeChatAccountItem } from '@/api/crawler'
 import { toast } from '@/components/ui/toast'
 
 export function WeChatDataList() {
@@ -14,6 +14,9 @@ export function WeChatDataList() {
   const [searchTerm, setSearchTerm] = useState('')
   const [timeRange, setTimeRange] = useState<'all' | 'today' | 'week' | 'month'>('all')
   const [debouncedSearch, setDebouncedSearch] = useState('')
+  const [selectedAccounts, setSelectedAccounts] = useState<string[]>([])
+  const [accountDropdownOpen, setAccountDropdownOpen] = useState(false)
+  const dropdownRef = useRef<HTMLDivElement>(null)
 
   // 防抖搜索
   React.useEffect(() => {
@@ -24,9 +27,28 @@ export function WeChatDataList() {
     return () => clearTimeout(timer)
   }, [searchTerm])
 
+  // 点击外部关闭下拉框
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setAccountDropdownOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  // 获取公众号列表
+  const { data: accountsData } = useQuery({
+    queryKey: ['wechat-accounts'],
+    queryFn: () => crawlerApi.getWeChatAccounts(),
+    staleTime: 60000,
+  })
+  const accounts = accountsData?.data || []
+
   // 获取文章列表
   const { data, isLoading, refetch, isError, error, isFetching } = useQuery({
-    queryKey: ['wechat-articles', page, pageSize, debouncedSearch, timeRange],
+    queryKey: ['wechat-articles', page, pageSize, debouncedSearch, timeRange, selectedAccounts],
     queryFn: () => crawlerApi.getWeChatArticles({
       page,
       page_size: pageSize,
@@ -34,6 +56,7 @@ export function WeChatDataList() {
       time_range: timeRange,
       order_by: 'create_time',
       order_dir: 'desc',
+      account_ids: selectedAccounts.length > 0 ? selectedAccounts.join(',') : undefined,
     }),
     staleTime: 30000,
     placeholderData: (previousData) => previousData, // 保持上一次数据，避免闪烁
@@ -80,6 +103,30 @@ export function WeChatDataList() {
     setPage(1)
   }
 
+  // 切换账号选择
+  const toggleAccount = (fakeid: string) => {
+    setSelectedAccounts(prev => {
+      const newSelection = prev.includes(fakeid)
+        ? prev.filter(id => id !== fakeid)
+        : [...prev, fakeid]
+      setPage(1) // 切换账号时重置页码
+      return newSelection
+    })
+  }
+
+  // 清除账号选择
+  const clearAccountSelection = () => {
+    setSelectedAccounts([])
+    setPage(1)
+  }
+
+  // 获取已选账号名称
+  const getSelectedAccountNames = () => {
+    return selectedAccounts
+      .map(id => accounts.find((a: WeChatAccountItem) => a.fakeid === id)?.account_name)
+      .filter(Boolean)
+  }
+
   // 分页跳转
   const goToPage = (targetPage: number) => {
     const validPage = Math.max(1, Math.min(totalPages, targetPage))
@@ -111,6 +158,97 @@ export function WeChatDataList() {
             <option value="week">近7天</option>
             <option value="month">近30天</option>
           </Select>
+          
+          {/* 公众号多选过滤器 */}
+          <div className="relative" ref={dropdownRef}>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setAccountDropdownOpen(!accountDropdownOpen)}
+              className={`h-9 min-w-[140px] max-w-[240px] justify-between text-sm bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 ${
+                selectedAccounts.length > 0 ? 'border-green-500 text-green-600 dark:text-green-400' : ''
+              }`}
+            >
+              <div className="flex items-center gap-2 truncate">
+                <User className="h-3.5 w-3.5 flex-shrink-0" />
+                {selectedAccounts.length === 0 ? (
+                  <span className="text-slate-500">全部公众号</span>
+                ) : selectedAccounts.length === 1 ? (
+                  <span className="truncate">{getSelectedAccountNames()[0]}</span>
+                ) : (
+                  <span>已选 {selectedAccounts.length} 个</span>
+                )}
+              </div>
+              <div className="flex items-center gap-1 flex-shrink-0">
+                {selectedAccounts.length > 0 && (
+                  <span
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      clearAccountSelection()
+                    }}
+                    className="p-0.5 hover:bg-slate-200 dark:hover:bg-slate-700 rounded"
+                  >
+                    <X className="h-3 w-3" />
+                  </span>
+                )}
+                <ChevronDown className={`h-4 w-4 transition-transform ${accountDropdownOpen ? 'rotate-180' : ''}`} />
+              </div>
+            </Button>
+            
+            {/* 下拉菜单 */}
+            {accountDropdownOpen && (
+              <div className="absolute top-full left-0 mt-1 w-64 max-h-80 overflow-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-lg z-50">
+                {accounts.length === 0 ? (
+                  <div className="px-3 py-4 text-sm text-slate-500 text-center">
+                    暂无公众号数据
+                  </div>
+                ) : (
+                  <>
+                    {/* 全选/清除 */}
+                    <div className="px-3 py-2 border-b border-slate-100 dark:border-slate-700 flex items-center justify-between">
+                      <span className="text-xs text-slate-500">共 {accounts.length} 个公众号</span>
+                      {selectedAccounts.length > 0 && (
+                        <button
+                          onClick={clearAccountSelection}
+                          className="text-xs text-green-600 hover:text-green-700 dark:text-green-400"
+                        >
+                          清除选择
+                        </button>
+                      )}
+                    </div>
+                    {/* 账号列表 */}
+                    <div className="py-1">
+                      {accounts.map((account: WeChatAccountItem) => (
+                        <div
+                          key={account.fakeid}
+                          onClick={() => toggleAccount(account.fakeid)}
+                          className={`flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors ${
+                            selectedAccounts.includes(account.fakeid) ? 'bg-green-50 dark:bg-green-900/20' : ''
+                          }`}
+                        >
+                          <div className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 ${
+                            selectedAccounts.includes(account.fakeid)
+                              ? 'bg-green-500 border-green-500 text-white'
+                              : 'border-slate-300 dark:border-slate-600'
+                          }`}>
+                            {selectedAccounts.includes(account.fakeid) && <Check className="h-3 w-3" />}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="text-sm font-medium text-slate-700 dark:text-slate-200 truncate">
+                              {account.account_name || '未知公众号'}
+                            </div>
+                            <div className="text-xs text-slate-500">
+                              {account.article_count} 篇文章
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <Button 
@@ -180,14 +318,24 @@ export function WeChatDataList() {
                 <div className="flex items-start gap-4">
                   {/* 封面图 (如果有) */}
                   {article.cover && (
-                    <div className="flex-shrink-0 w-24 h-16 rounded-md overflow-hidden bg-slate-100 dark:bg-slate-800">
+                    <div className="flex-shrink-0 w-24 h-16 rounded-md overflow-hidden bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
                       <img 
                         src={article.cover} 
                         alt="" 
                         className="w-full h-full object-cover"
                         loading="lazy"
+                        referrerPolicy="no-referrer"
                         onError={(e) => {
-                          (e.target as HTMLImageElement).style.display = 'none'
+                          const img = e.target as HTMLImageElement
+                          img.style.display = 'none'
+                          // 显示占位图标
+                          const parent = img.parentElement
+                          if (parent && !parent.querySelector('.placeholder-icon')) {
+                            const placeholder = document.createElement('div')
+                            placeholder.className = 'placeholder-icon text-slate-400 dark:text-slate-500'
+                            placeholder.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>'
+                            parent.appendChild(placeholder)
+                          }
                         }}
                       />
                     </div>
