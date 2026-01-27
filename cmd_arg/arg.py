@@ -55,6 +55,7 @@ class LoginTypeEnum(str, Enum):
     QRCODE = "qrcode"
     PHONE = "phone"
     COOKIE = "cookie"
+    MP_QRCODE = "mp_qrcode"  # WeChat MP backend login
 
 
 class CrawlerTypeEnum(str, Enum):
@@ -156,7 +157,7 @@ async def parse_cmd(argv: Optional[Sequence[str]] = None):
             LoginTypeEnum,
             typer.Option(
                 "--lt",
-                help="Login type (qrcode=QR Code | phone=Phone | cookie=Cookie)",
+                help="Login type (qrcode=QR Code | phone=Phone | cookie=Cookie | mp_qrcode=WeChat MP Backend)",
                 rich_help_panel="Account Configuration",
             ),
         ] = _coerce_enum(LoginTypeEnum, config.LOGIN_TYPE, LoginTypeEnum.QRCODE),

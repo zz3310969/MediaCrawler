@@ -6,17 +6,15 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Select } from '@/components/ui/select'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { crawlerApi, type Platform, type CrawlerType } from '@/api/crawler'
+import { crawlerApi, type CrawlerType } from '@/api/crawler'
 
 interface TargetConfigProps {
-  platform: Platform
   crawlerType: CrawlerType
   keywords: string
   specifiedIds: string
   creatorIds: string
   startPage: number
   disabled?: boolean
-  onPlatformChange: (value: Platform) => void
   onCrawlerTypeChange: (value: CrawlerType) => void
   onKeywordsChange: (value: string) => void
   onSpecifiedIdsChange: (value: string) => void
@@ -25,26 +23,18 @@ interface TargetConfigProps {
 }
 
 export function TargetConfig({
-  platform,
   crawlerType,
   keywords,
   specifiedIds,
   creatorIds,
   startPage,
   disabled,
-  onPlatformChange,
   onCrawlerTypeChange,
   onKeywordsChange,
   onSpecifiedIdsChange,
   onCreatorIdsChange,
   onStartPageChange,
 }: TargetConfigProps) {
-  // 获取平台列表
-  const { data: platformsResponse } = useQuery({
-    queryKey: ['platforms'],
-    queryFn: crawlerApi.getPlatforms,
-  })
-
   // 获取配置选项
   const { data: configResponse } = useQuery({
     queryKey: ['config-options'],
@@ -70,7 +60,6 @@ export function TargetConfig({
   // 获取创作者ID数组（自动去重）
   const creatorList = deduplicateList(creatorIds ? creatorIds.split(',') : [])
 
-  const platforms = platformsResponse?.data?.platforms || []
   const crawlerTypes = configResponse?.data?.crawler_types || []
 
   // 处理回车键添加关键词
@@ -206,22 +195,6 @@ export function TargetConfig({
       </CardHeader>
 
       <CardContent className="space-y-2 px-4 pb-3">
-        {/* 平台选择 */}
-        <div className="space-y-1">
-          <Label className="text-xs">平台</Label>
-          <Select
-            value={platform}
-            onChange={(e) => onPlatformChange(e.target.value as Platform)}
-            disabled={disabled || platforms.length === 0}
-          >
-            {platforms.map((p: { value: string; label: string; icon: string }) => (
-              <option key={p.value} value={p.value}>
-                {p.label}
-              </option>
-            ))}
-          </Select>
-        </div>
-
         {/* 爬取类型和起始页（同一行） */}
         <div className="grid grid-cols-2 gap-2">
           {/* 爬取类型 */}

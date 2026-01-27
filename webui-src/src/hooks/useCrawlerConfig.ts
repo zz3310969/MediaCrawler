@@ -30,6 +30,7 @@ const DEFAULT_CONFIG: CrawlerStartRequest = {
   wechat_credentials_uin: '',
   wechat_credentials_key: '',
   wechat_credentials_pass_ticket: '',
+  wechat_token: '', // 新增 Token 字段
 }
 
 export function useCrawlerConfig() {

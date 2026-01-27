@@ -5,9 +5,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Select } from '@/components/ui/select'
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
-import { crawlerApi, type SaveOption, type CrawlerType } from '@/api/crawler'
+import { crawlerApi, type SaveOption, type CrawlerType, type Platform } from '@/api/crawler'
 
 interface OutputConfigProps {
+  platform?: Platform
   saveOption: SaveOption
   enableComments: boolean
   enableSubComments: boolean
@@ -27,6 +28,7 @@ interface OutputConfigProps {
 }
 
 export function OutputConfig({
+  platform,
   saveOption,
   enableComments,
   enableSubComments,
@@ -55,6 +57,9 @@ export function OutputConfig({
   const supportsIncremental = incrementalConfig && 
     crawlerType && 
     incrementalConfig.supports_crawler_types.includes(crawlerType)
+  
+  // 微信平台已在 WeChatConfig 中配置了评论和阅读量，这里隐藏通用评论开关
+  const showCommentsConfig = platform !== 'wechat'
 
   return (
     <Card className="h-full">
@@ -64,7 +69,7 @@ export function OutputConfig({
           <div className="flex items-baseline gap-2">
             <CardTitle className="text-base font-medium">输出配置</CardTitle>
             <CardDescription className="text-xs text-muted-foreground/60">
-              保存格式及后处理选项
+              数据存储与运行模式
             </CardDescription>
           </div>
         </div>
@@ -73,7 +78,7 @@ export function OutputConfig({
       <CardContent className="space-y-2 px-4 pb-3">
         {/* 保存格式 */}
         <div className="space-y-1">
-          <Label className="text-xs">保存格式</Label>
+          <Label className="text-xs">数据存储</Label>
           <Select
             value={saveOption}
             onChange={(e) => onSaveOptionChange(e.target.value as SaveOption)}
@@ -89,39 +94,43 @@ export function OutputConfig({
 
         {/* 爬取选项 */}
         <div className="space-y-2 pt-1.5">
-          <label
-            htmlFor="enable-comments"
-            className="flex items-center justify-between py-1.5 px-3 bg-secondary/50 rounded-md cursor-pointer hover:bg-secondary/70 transition-colors"
-          >
-            <div className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                id="enable-comments"
-                checked={enableComments}
-                onChange={(e) => onEnableCommentsChange(e.target.checked)}
-                disabled={disabled}
-                className="w-4 h-4 rounded border-gray-600 bg-gray-700 cursor-pointer"
-              />
-              <span className="text-sm">评论抓取</span>
-            </div>
-          </label>
+          {showCommentsConfig && (
+            <>
+              <label
+                htmlFor="enable-comments"
+                className="flex items-center justify-between py-1.5 px-3 bg-secondary/50 rounded-md cursor-pointer hover:bg-secondary/70 transition-colors"
+              >
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="enable-comments"
+                    checked={enableComments}
+                    onChange={(e) => onEnableCommentsChange(e.target.checked)}
+                    disabled={disabled}
+                    className="w-4 h-4 rounded border-gray-600 bg-gray-700 cursor-pointer"
+                  />
+                  <span className="text-sm">评论抓取</span>
+                </div>
+              </label>
 
-          <label
-            htmlFor="enable-sub-comments"
-            className="flex items-center justify-between py-1.5 px-3 bg-secondary/50 rounded-md cursor-pointer hover:bg-secondary/70 transition-colors"
-          >
-            <div className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                id="enable-sub-comments"
-                checked={enableSubComments}
-                onChange={(e) => onEnableSubCommentsChange(e.target.checked)}
-                disabled={disabled}
-                className="w-4 h-4 rounded border-gray-600 bg-gray-700 cursor-pointer"
-              />
-              <span className="text-sm">子评论</span>
-            </div>
-          </label>
+              <label
+                htmlFor="enable-sub-comments"
+                className="flex items-center justify-between py-1.5 px-3 bg-secondary/50 rounded-md cursor-pointer hover:bg-secondary/70 transition-colors"
+              >
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="enable-sub-comments"
+                    checked={enableSubComments}
+                    onChange={(e) => onEnableSubCommentsChange(e.target.checked)}
+                    disabled={disabled}
+                    className="w-4 h-4 rounded border-gray-600 bg-gray-700 cursor-pointer"
+                  />
+                  <span className="text-sm">子评论</span>
+                </div>
+              </label>
+            </>
+          )}
 
           <label
             htmlFor="headless"

@@ -43,6 +43,12 @@ class CrawlerManager:
         self._project_root = Path(__file__).parent.parent.parent
         # Log queue - for pushing to WebSocket
         self._log_queue: Optional[asyncio.Queue] = None
+        # Store new cookies after login
+        self.new_cookies: Optional[str] = None
+        # Store new token after login
+        self.new_token: Optional[str] = None
+        # Store new qrcode image (base64)
+        self.qrcode_img: Optional[str] = None
 
     @property
     def logs(self) -> List[LogEntry]:
@@ -99,6 +105,9 @@ class CrawlerManager:
             # Clear old logs
             self._logs = []
             self._log_id = 0
+            self.new_cookies = None  # Clear old cookies
+            self.new_token = None  # Clear old token
+            self.qrcode_img = None # Clear old qrcode
 
             # Clear pending queue (don't replace object to avoid WebSocket broadcast coroutine holding old queue reference)
             if self._log_queue is None:
@@ -199,7 +208,10 @@ class CrawlerManager:
             "platform": self.current_config.platform.value if self.current_config else None,
             "crawler_type": self.current_config.crawler_type.value if self.current_config else None,
             "started_at": self.started_at.isoformat() if self.started_at else None,
-            "error_message": None
+            "error_message": None,
+            "new_cookies": self.new_cookies,
+            "new_token": self.new_token,
+            "qrcode_img": self.qrcode_img
         }
 
     def _build_command(self, config: CrawlerStartRequest) -> list:
@@ -272,9 +284,26 @@ class CrawlerManager:
                 if line:
                     line = line.strip()
                     if line:
-                        level = self._parse_log_level(line)
-                        entry = self._create_log_entry(line, level)
-                        await self._push_log(entry)
+                        # Check for cookie update
+                        if line.startswith("[COOKIE_UPDATE]"):
+                            self.new_cookies = line.replace("[COOKIE_UPDATE]", "").strip()
+                            # Create a success log for it
+                            entry = self._create_log_entry("Cookie retrieved successfully", "success")
+                            await self._push_log(entry)
+                        # Check for token update
+                        elif line.startswith("[TOKEN_UPDATE]"):
+                            self.new_token = line.replace("[TOKEN_UPDATE]", "").strip()
+                            entry = self._create_log_entry("Token retrieved successfully", "success")
+                            await self._push_log(entry)
+                        # Check for QR code update
+                        elif line.startswith("[QRCODE_UPDATE]"):
+                            self.qrcode_img = line.replace("[QRCODE_UPDATE]", "").strip()
+                            entry = self._create_log_entry("QR Code retrieved successfully", "success")
+                            await self._push_log(entry)
+                        else:
+                            level = self._parse_log_level(line)
+                            entry = self._create_log_entry(line, level)
+                            await self._push_log(entry)
 
             # Read remaining output
             if self.process and self.process.stdout:

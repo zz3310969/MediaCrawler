@@ -31,6 +31,7 @@ from playwright.async_api import (
 )
 
 import config
+from config import wechat_config
 from base.base_crawler import AbstractCrawler
 from proxy.proxy_ip_pool import IpInfoModel, create_ip_pool
 from tools import utils
@@ -110,8 +111,10 @@ class WeChatCrawler(AbstractCrawler):
             # 创建客户端
             self.wechat_client = await self.create_wechat_client(httpx_proxy_format)
             
-            # 检查登录状态
-            if not await self.wechat_client.pong():
+            # 首先检查是否已经登录（从当前页面URL或cookies中提取token）
+            is_logged_in = await self._check_existing_login()
+            
+            if not is_logged_in:
                 cookie_str = self._get_account_cookies() or config.COOKIES
                 login_type = config.LOGIN_TYPE
                 
@@ -274,12 +277,12 @@ class WeChatCrawler(AbstractCrawler):
             utils.logger.info(f"[WeChatCrawler.save_article] Saving article: {article_data['title']}")
             
             # 如果启用了文章内容下载，获取HTML内容
-            if config.ENABLE_GET_ARTICLE_CONTENT and article_link:
+            if wechat_config.ENABLE_GET_ARTICLE_CONTENT and article_link:
                 try:
                     utils.logger.info(f"[WeChatCrawler.save_article] Downloading HTML content...")
                     
                     # 判断是否需要使用凭证（用于获取阅读量）
-                    with_credential = config.ENABLE_GET_READING_STATS
+                    with_credential = wechat_config.ENABLE_GET_READING_STATS
                     
                     html_content = await self.wechat_client.get_article_html(
                         article_link,
@@ -335,8 +338,8 @@ class WeChatCrawler(AbstractCrawler):
                         utils.logger.warning(f"[WeChatCrawler.save_article] Failed to download HTML content")
                     
                     # 添加延迟，避免请求过快
-                    if config.ARTICLE_CONTENT_CRAWL_DELAY > 0:
-                        await asyncio.sleep(config.ARTICLE_CONTENT_CRAWL_DELAY)
+                    if wechat_config.ARTICLE_CONTENT_CRAWL_DELAY > 0:
+                        await asyncio.sleep(wechat_config.ARTICLE_CONTENT_CRAWL_DELAY)
                         
                 except Exception as e:
                     utils.logger.error(f"[WeChatCrawler.save_article] Error downloading HTML: {e}")
@@ -1342,6 +1345,75 @@ class WeChatCrawler(AbstractCrawler):
         except Exception as e:
             utils.logger.error(f"[WeChatCrawler._crawl_single_album] Error: {e}")
 
+    async def _check_existing_login(self) -> bool:
+        """
+        检查是否已经登录（用于CDP模式下复用已有登录状态）
+        
+        Returns:
+            True if already logged in, False otherwise
+        """
+        import re
+        from urllib.parse import parse_qs, urlparse
+        
+        utils.logger.info("[WeChatCrawler._check_existing_login] Checking existing login status...")
+        
+        try:
+            # 获取当前页面URL
+            current_url = self.context_page.url
+            utils.logger.info(f"[WeChatCrawler._check_existing_login] Current URL: {current_url}")
+            
+            # 尝试从URL中提取token
+            token = None
+            parsed = urlparse(current_url)
+            params = parse_qs(parsed.query)
+            
+            if 'token' in params:
+                token = params['token'][0]
+            else:
+                # 尝试正则匹配
+                match = re.search(r'token=([^&]+)', current_url)
+                if match:
+                    token = match.group(1)
+            
+            if token:
+                utils.logger.info(f"[WeChatCrawler._check_existing_login] Found token in URL, already logged in")
+                self.wechat_client.set_token(token)
+                return True
+            
+            # 如果URL中没有token，检查cookies是否包含登录信息
+            cookies = await self.browser_context.cookies()
+            _, cookie_dict = utils.convert_cookies(cookies)
+            
+            has_data_ticket = bool(cookie_dict.get("data_ticket"))
+            has_ticket = bool(cookie_dict.get("ticket"))
+            has_data_bizuin = bool(cookie_dict.get("data_bizuin"))
+            
+            if has_data_ticket or has_ticket or has_data_bizuin:
+                utils.logger.info("[WeChatCrawler._check_existing_login] Found login cookies, navigating to get token...")
+                
+                # 导航到公众号后台首页获取token
+                await self.context_page.goto("https://mp.weixin.qq.com/", wait_until="networkidle")
+                await asyncio.sleep(2)
+                
+                # 再次检查URL中的token
+                current_url = self.context_page.url
+                parsed = urlparse(current_url)
+                params = parse_qs(parsed.query)
+                
+                if 'token' in params:
+                    token = params['token'][0]
+                    utils.logger.info(f"[WeChatCrawler._check_existing_login] Token extracted after navigation")
+                    self.wechat_client.set_token(token)
+                    await self.wechat_client.update_cookies(browser_context=self.browser_context)
+                    return True
+            
+            utils.logger.info("[WeChatCrawler._check_existing_login] Not logged in, need to login")
+            return False
+            
+        except Exception as e:
+            utils.logger.error(f"[WeChatCrawler._check_existing_login] Error checking login: {e}")
+            return False
+
     async def create_wechat_client(self, httpx_proxy: Optional[str]) -> WeChatClient:
         """创建微信客户端"""
         utils.logger.info("[WeChatCrawler.create_wechat_client] Creating WeChat client...")
@@ -1405,17 +1477,14 @@ class WeChatCrawler(AbstractCrawler):
         
         from tools.cdp_browser import CDPBrowserManager
         
-        self.cdp_manager = CDPBrowserManager(
+        self.cdp_manager = CDPBrowserManager()
+        
+        browser_context = await self.cdp_manager.launch_and_connect(
+            playwright=playwright,
+            playwright_proxy=playwright_proxy,
+            user_agent=user_agent,
             headless=headless,
-            proxy_config=playwright_proxy,
-            custom_browser_path=config.CUSTOM_BROWSER_PATH,
-            debug_port=config.CDP_DEBUG_PORT,
         )
-        
-        browser_context = await self.cdp_manager.connect(playwright)
-        
-        if user_agent:
-            await browser_context.set_extra_http_headers({"User-Agent": user_agent})
         
         return browser_context
 

@@ -98,6 +98,7 @@ class CrawlerStartRequest(BaseModel):
     wechat_credentials_uin: str = ""  # 微信凭证 uin
     wechat_credentials_key: str = ""  # 微信凭证 key
     wechat_credentials_pass_ticket: str = ""  # 微信凭证 pass_ticket
+    wechat_token: str = ""  # 微信后台 token
 
 
 class CrawlerStatusResponse(BaseModel):
@@ -109,6 +110,9 @@ class CrawlerStatusResponse(BaseModel):
     error_message: Optional[str] = None
     # 进度信息
     progress: Optional[dict] = None  # 包含 current, total, percentage 等
+    new_cookies: Optional[str] = None  # 登录成功后获取的新Cookie
+    new_token: Optional[str] = None  # 登录成功后获取的新Token
+    qrcode_img: Optional[str] = None  # 扫码登录的二维码 (base64)
 
 
 class WeChatProgressInfo(BaseModel):

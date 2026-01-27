@@ -38,7 +38,7 @@ project_root = Path(__file__).resolve().parents[1]
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
-from .routers import crawler_router, data_router, websocket_router
+from .routers import crawler_router, data_router, websocket_router, wechat_router
 import config
 from database import db
 
@@ -108,6 +108,7 @@ app.add_middleware(
 app.include_router(crawler_router, prefix="/api")
 app.include_router(data_router, prefix="/api")
 app.include_router(websocket_router, prefix="/api")
+app.include_router(wechat_router, prefix="/api")
 
 
 @app.get("/")

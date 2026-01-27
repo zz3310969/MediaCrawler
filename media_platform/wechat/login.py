@@ -123,6 +123,9 @@ class WeChatLogin(AbstractLogin):
             partial_show_qrcode = functools.partial(utils.show_qrcode, base64_qrcode_img)
             asyncio.get_running_loop().run_in_executor(executor=None, func=partial_show_qrcode)
             
+            # 打印二维码供 WebUI 捕获
+            print(f"[QRCODE_UPDATE] {base64_qrcode_img}")
+            
             utils.logger.info("[WeChatLogin.login_by_qrcode] Please scan the QR code with WeChat...")
             
             # 等待登录成功
@@ -145,6 +148,15 @@ class WeChatLogin(AbstractLogin):
                 utils.logger.info(f"[WeChatLogin.login_by_qrcode] Token extracted successfully")
             else:
                 utils.logger.warning("[WeChatLogin.login_by_qrcode] Token not found in URL")
+            
+            # 获取并打印Cookie，供WebUI捕获
+            cookies = await self.browser_context.cookies()
+            cookie_str, _ = utils.convert_cookies(cookies)
+            # 使用特殊前缀，方便 crawler_manager 解析
+            # 注意：print输出会被重定向到stdout，被crawler_manager读取
+            print(f"[COOKIE_UPDATE] {cookie_str}")
+            if self.token:
+                print(f"[TOKEN_UPDATE] {self.token}")
             
             utils.logger.info("[WeChatLogin.login_by_qrcode] Login completed successfully")
             

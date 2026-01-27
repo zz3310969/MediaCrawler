@@ -33,6 +33,7 @@ export interface CrawlerStartRequest {
   wechat_credentials_uin?: string  // 微信凭证 uin
   wechat_credentials_key?: string  // 微信凭证 key
   wechat_credentials_pass_ticket?: string  // 微信凭证 pass_ticket
+  wechat_token?: string // 微信后台 token
 }
 
 export interface CrawlerStatus {
@@ -43,6 +44,9 @@ export interface CrawlerStatus {
   error_message?: string
   // 进度信息
   progress?: CrawlerProgress
+  new_cookies?: string // 登录成功后获取的新Cookie
+  new_token?: string // 登录成功后获取的新Token
+  qrcode_img?: string // 扫码登录的二维码 (base64)
 }
 
 export interface CrawlerProgress {
@@ -141,6 +145,15 @@ export const crawlerApi = {
   // 下载数据文件
   downloadFile: (filePath: string) => {
     return `/api/data/download/${filePath}`
+  },
+  
+  // 微信公众号搜索 (需登录)
+  searchWeChatAccount: (keyword: string, cookies: string, token: string) => {
+    return client.post<{ list: any[] }>('/api/wechat/search_account', { 
+      keyword, 
+      cookies, 
+      token 
+    })
   },
 }
 
