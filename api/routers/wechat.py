@@ -1050,9 +1050,22 @@ async def export_articles(request: ExportRequest):
             if not articles:
                 raise HTTPException(status_code=404, detail="未找到指定的文章")
             
-            # 检查是否有内容
-            articles_with_content = [a for a in articles if a.content]
-            articles_without_content = [a for a in articles if not a.content]
+            # 辅助函数：获取文章内容（支持文件存储和数据库存储）
+            async def get_article_content(article) -> str:
+                """获取文章内容，优先从文件读取"""
+                # 优先从文件读取
+                if article.content_path:
+                    from tools.content_storage import get_wechat_content_storage
+                    storage = get_wechat_content_storage()
+                    content = await storage.load_content(article.content_path)
+                    if content:
+                        return content
+                # 回退到数据库内容
+                return article.content or ""
+            
+            # 检查是否有内容（包括文件存储）
+            articles_with_content = [a for a in articles if a.content or a.content_path]
+            articles_without_content = [a for a in articles if not a.content and not a.content_path]
             utils.logger.info(f"[WeChatAPI] Articles with content: {len(articles_with_content)}, without content: {len(articles_without_content)}")
             
             # 创建 ZIP 文件
@@ -1074,9 +1087,12 @@ async def export_articles(request: ExportRequest):
                     utils.logger.info(f"[WeChatAPI] Processing article {article_idx + 1}/{len(articles)}: {article.title}")
                     
                     if export_format == "html":
-                        if article.content:
+                        # 获取文章内容（支持文件存储）
+                        html_content = await get_article_content(article)
+                        
+                        if html_content:
                             # 先提取资源（从原始 HTML）
-                            resources = extract_resources_from_html(article.content)
+                            resources = extract_resources_from_html(html_content)
                             utils.logger.info(f"[WeChatAPI] Found {len(resources)} resources in article")
                             
                             # 下载资源并建立映射
@@ -1100,7 +1116,7 @@ async def export_articles(request: ExportRequest):
                                 await asyncio.sleep(0.1)
                             
                             # 清理 HTML 并替换资源路径（参考 wechat-article-exporter）
-                            page_content, body_class, css_links = clean_html_for_export(article.content, url_map)
+                            page_content, body_class, css_links = clean_html_for_export(html_content, url_map)
                             
                             # 生成最终 HTML 文档
                             html_document = generate_final_html(
@@ -1127,8 +1143,11 @@ async def export_articles(request: ExportRequest):
                             zip_file.writestr(f"{dir_name}/index.html", placeholder.encode('utf-8'))
                     
                     elif export_format == "markdown":
-                        if article.content:
-                            md_content = html_to_markdown(article.content, article.title)
+                        # 获取文章内容（支持文件存储）
+                        html_content = await get_article_content(article)
+                        
+                        if html_content:
+                            md_content = html_to_markdown(html_content, article.title)
                             meta = f"""---
 title: "{article.title or ''}"
 author: "{article.author or ''}"
@@ -1156,6 +1175,9 @@ title: "{article.title or ''}"
                             zip_file.writestr(f"{dir_name}_无内容.md", placeholder.encode('utf-8'))
                     
                     elif export_format == "json":
+                        # 获取文章内容（支持文件存储）
+                        html_content = await get_article_content(article)
+                        
                         article_data = {
                             "id": article.id,
                             "article_id": article.article_id,
@@ -1163,8 +1185,8 @@ title: "{article.title or ''}"
                             "author": article.author or "",
                             "account_name": article.account_name or "",
                             "fakeid": article.fakeid or "",
-                            "content": article.content or "",
-                            "content_available": bool(article.content),
+                            "content": html_content,
+                            "content_available": bool(html_content),
                             "link": article.link or "",
                             "cover": article.cover or "",
                             "create_time": article.create_time,
@@ -1293,8 +1315,30 @@ async def refetch_article_content(request: RefetchRequest):
                             
                             # 简单验证 HTML 内容
                             if 'js_content' in html_content or 'rich_media_content' in html_content:
-                                # 更新数据库
-                                article.content = html_content
+                                # 检查是否启用文件存储
+                                from config import wechat_config
+                                enable_file_storage = getattr(wechat_config, 'ENABLE_CONTENT_FILE_STORAGE', True)
+                                
+                                if enable_file_storage:
+                                    # 存储到本地文件
+                                    from tools.content_storage import get_wechat_content_storage
+                                    storage = get_wechat_content_storage()
+                                    content_path = await storage.save_content(
+                                        article.article_id, 
+                                        html_content, 
+                                        article.fakeid or ""
+                                    )
+                                    if content_path:
+                                        article.content_path = content_path
+                                        article.content = ""  # 清空数据库中的内容
+                                        utils.logger.info(f"[WeChatAPI] Content saved to file: {content_path}")
+                                    else:
+                                        # 文件存储失败，回退到数据库
+                                        article.content = html_content
+                                else:
+                                    # 直接存储到数据库
+                                    article.content = html_content
+                                
                                 article.last_modify_ts = int(datetime.now().timestamp() * 1000)
                                 
                                 article_result["status"] = "success"

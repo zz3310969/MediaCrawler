@@ -72,6 +72,29 @@ class WeChatDbStoreImplement(AbstractStore):
     
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        self._content_storage = None
+    
+    def _get_content_storage(self):
+        """延迟初始化内容存储器"""
+        if self._content_storage is None:
+            from tools.content_storage import ContentStorage
+            from config import wechat_config
+            base_dir = getattr(wechat_config, 'CONTENT_STORAGE_BASE_DIR', 'data')
+            self._content_storage = ContentStorage(platform="wechat", base_dir=base_dir)
+        return self._content_storage
+    
+    def _is_file_storage_enabled(self) -> bool:
+        """检查是否启用文件存储"""
+        from config import wechat_config
+        return getattr(wechat_config, 'ENABLE_CONTENT_FILE_STORAGE', True)
+    
+    async def _save_content_to_file(self, article_id: str, content: str, fakeid: str = "") -> str:
+        """保存内容到文件，返回文件路径"""
+        if not content or not self._is_file_storage_enabled():
+            return ""
+        
+        storage = self._get_content_storage()
+        return await storage.save_content(article_id, content, fakeid)
     
     async def store_content(self, content_item: Dict):
         """存储文章内容到数据库"""
@@ -105,8 +128,28 @@ class WeChatDbStoreImplement(AbstractStore):
         add_ts = int(utils.get_current_timestamp())
         last_modify_ts = int(utils.get_current_timestamp())
         
+        article_id = content_item.get("article_id")
+        fakeid = content_item.get("fakeid", "")
+        content = content_item.get("content", "")
+        
+        # 根据配置决定存储方式
+        content_path = ""
+        db_content = ""
+        
+        if self._is_file_storage_enabled() and content:
+            # 存储到文件
+            content_path = await self._save_content_to_file(article_id, content, fakeid)
+            if content_path:
+                utils.logger.info(f"[WeChatDbStoreImplement._add_article] Content saved to file: {content_path}")
+            else:
+                # 文件存储失败，回退到数据库存储
+                db_content = content
+        else:
+            # 直接存储到数据库
+            db_content = content
+        
         article = WeChatArticle(
-            article_id=content_item.get("article_id"),
+            article_id=article_id,
             title=content_item.get("title", ""),
             link=content_item.get("link", ""),
             cover=content_item.get("cover", ""),
@@ -114,9 +157,10 @@ class WeChatDbStoreImplement(AbstractStore):
             create_time=content_item.get("create_time", 0),
             update_time=content_item.get("update_time", 0),
             author=content_item.get("author", ""),
-            fakeid=content_item.get("fakeid", ""),
+            fakeid=fakeid,
             account_name=content_item.get("account_name", ""),
-            content=content_item.get("content", ""),
+            content=db_content,
+            content_path=content_path,
             read_num=content_item.get("read_num", 0),
             like_num=content_item.get("like_num", 0),
             old_like_num=content_item.get("old_like_num", 0),
@@ -127,7 +171,7 @@ class WeChatDbStoreImplement(AbstractStore):
             last_modify_ts=last_modify_ts,
         )
         session.add(article)
-        utils.logger.info(f"[WeChatDbStoreImplement._add_article] Added article: {content_item.get('article_id')}")
+        utils.logger.info(f"[WeChatDbStoreImplement._add_article] Added article: {article_id}")
     
     async def _update_article(self, session, content_item: Dict):
         """更新现有文章"""
@@ -136,6 +180,8 @@ class WeChatDbStoreImplement(AbstractStore):
         from tools import utils
         
         article_id = content_item.get("article_id")
+        fakeid = content_item.get("fakeid", "")
+        content = content_item.get("content", "")
         last_modify_ts = int(utils.get_current_timestamp())
         
         # 准备更新数据
@@ -149,8 +195,17 @@ class WeChatDbStoreImplement(AbstractStore):
         }
         
         # 如果有HTML内容，也更新
-        if content_item.get("content"):
-            update_data["content"] = content_item.get("content")
+        if content:
+            if self._is_file_storage_enabled():
+                # 存储到文件
+                content_path = await self._save_content_to_file(article_id, content, fakeid)
+                if content_path:
+                    update_data["content_path"] = content_path
+                    update_data["content"] = ""  # 清空数据库中的内容
+                else:
+                    update_data["content"] = content
+            else:
+                update_data["content"] = content
         
         stmt = update(WeChatArticle).where(WeChatArticle.article_id == article_id).values(**update_data)
         await session.execute(stmt)

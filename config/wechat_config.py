@@ -98,6 +98,18 @@ ARTICLE_CONTENT_CRAWL_DELAY = 2
 # 是否下载文章资源（图片、视频、音频）
 ENABLE_DOWNLOAD_RESOURCES = False
 
+# ==================== 内容存储优化配置 ====================
+# 是否将文章HTML内容存储到本地文件（而非数据库）
+# 启用后，数据库只保存文件路径，大幅减少数据库体积
+# 内容文件存储路径：data/wechat/content/{fakeid}/{article_id}.html.gz
+ENABLE_CONTENT_FILE_STORAGE = True
+
+# 内容文件存储根目录
+CONTENT_STORAGE_BASE_DIR = "data"
+
+# 是否启用gzip压缩（推荐开启，可节省60-80%存储空间）
+ENABLE_CONTENT_COMPRESSION = True
+
 # ==================== 导出配置 ====================
 # 是否启用导出功能
 ENABLE_EXPORT = False

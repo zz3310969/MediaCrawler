@@ -37,6 +37,7 @@
 - ✅ MySQL/PostgreSQL 存储实现
 - ✅ SQLite 存储实现
 - ✅ 自动处理新增和更新逻辑
+- ✅ **文章内容本地文件存储优化**（减少数据库体积）
 
 #### 5. 基础爬取功能
 - ✅ 搜索公众号（`search_account`）
@@ -102,6 +103,14 @@ MAX_ARTICLES_PER_ACCOUNT = 100
 
 # 登录类型
 LOGIN_TYPE = "mp_qrcode"  # mp_qrcode: 公众号后台扫码登录
+
+# ==================== 内容存储优化配置 ====================
+# 是否将文章HTML内容存储到本地文件（而非数据库）
+# 启用后，数据库只保存文件路径，大幅减少数据库体积
+ENABLE_CONTENT_FILE_STORAGE = True
+
+# 内容文件存储根目录
+CONTENT_STORAGE_BASE_DIR = "data"
 ```
 
 编辑 `config/base_config.py`：
@@ -258,7 +267,8 @@ CREATE TABLE wechat_article (
     author VARCHAR(255),
     fakeid VARCHAR(128),
     account_name VARCHAR(255),
-    content TEXT,  -- HTML 内容
+    content TEXT,  -- HTML 内容（兼容旧数据）
+    content_path VARCHAR(512) DEFAULT '',  -- 文章内容文件路径（本地存储）
     read_num INT DEFAULT 0,
     like_num INT DEFAULT 0,
     comment_count INT DEFAULT 0,
@@ -269,6 +279,8 @@ CREATE TABLE wechat_article (
     INDEX idx_create_time (create_time)
 );
 ```
+
+> **存储优化说明**：启用 `ENABLE_CONTENT_FILE_STORAGE` 后，文章 HTML 内容会以 gzip 压缩格式存储到本地文件系统（`data/wechat/content/{fakeid}/{article_id}.html.gz`），数据库只保存文件路径。这可以减少 60-80% 的数据库存储空间。
 
 ### wechat_comment - 评论表
 ```sql
@@ -393,6 +405,11 @@ CREATE TABLE wechat_comment_reply (
 - ✅ 添加 BeautifulSoup4 依赖
 - ✅ 创建数据库表模型
 - ✅ 完成 P0 和 P1 优先级功能
+- ✅ **新增：文章内容本地文件存储优化**
+  - 支持将 HTML 内容存储到本地文件系统
+  - 使用 gzip 压缩，节省 60-80% 存储空间
+  - 数据库只保存文件路径，大幅减少数据库体积
+  - 提供数据迁移工具：`python -m tools.migrate_wechat_content`
 
 ---
 

@@ -166,3 +166,66 @@ async def save_wechat_account(account_item: Dict):
     utils.logger.info(f"[store.wechat.save_wechat_account] account: {fakeid}, name: {save_item['nickname']}")
     await WeChatStoreFactory.create_store().store_creator(creator=save_item)
 
+
+async def get_wechat_article_content(article_id: str) -> str:
+    """
+    获取微信文章的HTML内容（兼容文件存储和数据库存储）
+    
+    Args:
+        article_id: 文章ID
+        
+    Returns:
+        文章HTML内容
+    """
+    from database.db_session import get_session
+    from database.models import WeChatArticle
+    from sqlalchemy import select
+    from tools.content_storage import get_wechat_content_storage
+    
+    async with get_session() as session:
+        stmt = select(WeChatArticle).where(WeChatArticle.article_id == article_id)
+        result = await session.execute(stmt)
+        article = result.scalar_one_or_none()
+        
+        if not article:
+            return ""
+        
+        # 优先从文件读取
+        if article.content_path:
+            storage = get_wechat_content_storage()
+            content = await storage.load_content(article.content_path)
+            if content:
+                return content
+        
+        # 回退到数据库内容
+        return article.content or ""
+
+
+def get_wechat_article_content_sync(article_id: str) -> str:
+    """
+    同步方式获取微信文章的HTML内容
+    
+    Args:
+        article_id: 文章ID
+        
+    Returns:
+        文章HTML内容
+    """
+    import asyncio
+    
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            # 如果已经在异步上下文中，使用线程池
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(
+                    asyncio.run,
+                    get_wechat_article_content(article_id)
+                )
+                return future.result()
+        else:
+            return loop.run_until_complete(get_wechat_article_content(article_id))
+    except RuntimeError:
+        return asyncio.run(get_wechat_article_content(article_id))
+
