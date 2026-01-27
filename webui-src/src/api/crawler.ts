@@ -232,6 +232,41 @@ export const crawlerApi = {
     return client.get<WeChatAccountItem[]>('/api/wechat/accounts')
   },
   
+  // 导出文章内容
+  exportWeChatArticles: async (articleIds: number[], format: 'html' | 'markdown' | 'json') => {
+    const response = await fetch('/api/wechat/export', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        article_ids: articleIds,
+        format: format,
+      }),
+    })
+    
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: 'Export failed' }))
+      throw new Error(error.detail || 'Export failed')
+    }
+    
+    return response.blob()
+  },
+  
+  // 重新采集文章内容
+  refetchWeChatContent: (articleIds: number[]) => {
+    return client.post<{
+      success: number
+      failed: number
+      results: Array<{
+        id: number
+        title: string
+        status: 'success' | 'failed' | 'pending'
+        message: string
+      }>
+    }>('/api/wechat/refetch_content', { article_ids: articleIds })
+  },
+  
   // 获取微信统计数据
   getWeChatStats: () => {
     return client.get<WeChatStats>('/api/wechat/stats')

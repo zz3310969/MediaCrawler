@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react'
-import { Search, Download, RefreshCw, Eye, ThumbsUp, MessageCircle, Calendar, ExternalLink, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ChevronDown, X, Check, User } from 'lucide-react'
+import { Search, RefreshCw, Eye, ThumbsUp, MessageCircle, Calendar, ExternalLink, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ChevronDown, X, Check, User, FileSpreadsheet, CheckSquare, Square, MinusSquare, FileText, FileCode, FileJson, RotateCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -17,6 +17,14 @@ export function WeChatDataList() {
   const [selectedAccounts, setSelectedAccounts] = useState<string[]>([])
   const [accountDropdownOpen, setAccountDropdownOpen] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
+  // 文章勾选状态
+  const [selectedArticles, setSelectedArticles] = useState<Set<number>>(new Set())
+  const [isExporting, setIsExporting] = useState(false)
+  // 导出格式下拉
+  const [exportDropdownOpen, setExportDropdownOpen] = useState(false)
+  const exportDropdownRef = useRef<HTMLDivElement>(null)
+  // 重新采集状态
+  const [isRefetching, setIsRefetching] = useState(false)
 
   // 防抖搜索
   React.useEffect(() => {
@@ -32,6 +40,9 @@ export function WeChatDataList() {
     const handleClickOutside = (event: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
         setAccountDropdownOpen(false)
+      }
+      if (exportDropdownRef.current && !exportDropdownRef.current.contains(event.target as Node)) {
+        setExportDropdownOpen(false)
       }
     }
     document.addEventListener('mousedown', handleClickOutside)
@@ -131,6 +142,161 @@ export function WeChatDataList() {
   const goToPage = (targetPage: number) => {
     const validPage = Math.max(1, Math.min(totalPages, targetPage))
     setPage(validPage)
+  }
+
+  // 文章勾选相关
+  const toggleArticleSelection = (articleId: number) => {
+    setSelectedArticles(prev => {
+      const newSet = new Set(prev)
+      if (newSet.has(articleId)) {
+        newSet.delete(articleId)
+      } else {
+        newSet.add(articleId)
+      }
+      return newSet
+    })
+  }
+
+  // 全选当前页
+  const selectAllCurrentPage = () => {
+    const currentPageIds = articles.map((a: WeChatArticleItem) => a.id)
+    setSelectedArticles(prev => {
+      const newSet = new Set(prev)
+      currentPageIds.forEach(id => newSet.add(id))
+      return newSet
+    })
+  }
+
+  // 取消全选当前页
+  const deselectAllCurrentPage = () => {
+    const currentPageIds = articles.map((a: WeChatArticleItem) => a.id)
+    setSelectedArticles(prev => {
+      const newSet = new Set(prev)
+      currentPageIds.forEach(id => newSet.delete(id))
+      return newSet
+    })
+  }
+
+  // 清除所有选择
+  const clearAllSelection = () => {
+    setSelectedArticles(new Set())
+  }
+
+  // 检查当前页是否全选
+  const isAllCurrentPageSelected = articles.length > 0 && articles.every((a: WeChatArticleItem) => selectedArticles.has(a.id))
+  const isSomeCurrentPageSelected = articles.some((a: WeChatArticleItem) => selectedArticles.has(a.id))
+
+  // 导出选中的文章 - CSV 格式（仅元数据）
+  const handleExportCSV = async () => {
+    if (selectedArticles.size === 0) {
+      toast.error('请先选择要导出的文章')
+      return
+    }
+
+    setIsExporting(true)
+    setExportDropdownOpen(false)
+    try {
+      // 获取选中文章的完整数据
+      const selectedData = articles.filter((a: WeChatArticleItem) => selectedArticles.has(a.id))
+      
+      // 生成 CSV 内容
+      const headers = ['标题', '公众号', '阅读数', '在看数', '评论数', '发布时间', '链接']
+      const rows = selectedData.map((article: WeChatArticleItem) => [
+        `"${(article.title || '').replace(/"/g, '""')}"`,
+        `"${(article.account_name || '').replace(/"/g, '""')}"`,
+        article.read_num,
+        article.like_num,
+        article.comment_count,
+        article.create_time ? new Date(article.create_time * 1000).toLocaleString('zh-CN') : '',
+        article.link || ''
+      ])
+      
+      const csvContent = '\uFEFF' + [headers.join(','), ...rows.map(row => row.join(','))].join('\n')
+      
+      // 下载文件
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `微信文章导出_${new Date().toLocaleDateString('zh-CN').replace(/\//g, '-')}_${selectedArticles.size}篇.csv`
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      URL.revokeObjectURL(url)
+      
+      toast.success(`成功导出 ${selectedArticles.size} 篇文章元数据`)
+    } catch (err) {
+      toast.error('导出失败: ' + (err as Error).message)
+    } finally {
+      setIsExporting(false)
+    }
+  }
+
+  // 导出文章内容（HTML/Markdown/JSON）
+  const handleExportContent = async (format: 'html' | 'markdown' | 'json') => {
+    if (selectedArticles.size === 0) {
+      toast.error('请先选择要导出的文章')
+      return
+    }
+
+    setIsExporting(true)
+    setExportDropdownOpen(false)
+    
+    const formatNames = { html: 'HTML', markdown: 'Markdown', json: 'JSON' }
+    toast.info(`正在导出 ${selectedArticles.size} 篇文章为 ${formatNames[format]} 格式...`)
+    
+    try {
+      const blob = await crawlerApi.exportWeChatArticles(Array.from(selectedArticles), format)
+      
+      // 下载文件
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `微信文章导出_${format}_${new Date().toLocaleDateString('zh-CN').replace(/\//g, '-')}_${selectedArticles.size}篇.zip`
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      URL.revokeObjectURL(url)
+      
+      toast.success(`成功导出 ${selectedArticles.size} 篇文章（${formatNames[format]} 格式）`)
+    } catch (err) {
+      toast.error('导出失败: ' + (err as Error).message)
+    } finally {
+      setIsExporting(false)
+    }
+  }
+
+  // 重新采集选中文章的内容
+  const handleRefetchContent = async () => {
+    if (selectedArticles.size === 0) {
+      toast.error('请先选择要重新采集的文章')
+      return
+    }
+    
+    if (selectedArticles.size > 20) {
+      toast.error('单次最多重新采集 20 篇文章')
+      return
+    }
+
+    setIsRefetching(true)
+    toast.info(`正在重新采集 ${selectedArticles.size} 篇文章内容...`)
+    
+    try {
+      const result = await crawlerApi.refetchWeChatContent(Array.from(selectedArticles))
+      const data = result.data
+      
+      if (data.success > 0) {
+        toast.success(`采集完成：${data.success} 篇成功，${data.failed} 篇失败`)
+        // 刷新列表
+        refetch()
+      } else {
+        toast.error(`采集失败：${data.results.map(r => r.message).join(', ')}`)
+      }
+    } catch (err) {
+      toast.error('重新采集失败: ' + (err as Error).message)
+    } finally {
+      setIsRefetching(false)
+    }
   }
 
   return (
@@ -251,6 +417,20 @@ export function WeChatDataList() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {/* 选中状态提示 */}
+          {selectedArticles.size > 0 && (
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-green-50 dark:bg-green-900/20 rounded-md border border-green-200 dark:border-green-800">
+              <span className="text-sm text-green-700 dark:text-green-300">
+                已选 <span className="font-semibold">{selectedArticles.size}</span> 篇
+              </span>
+              <button
+                onClick={clearAllSelection}
+                className="text-xs text-green-600 hover:text-green-800 dark:text-green-400 dark:hover:text-green-200 underline"
+              >
+                清除
+              </button>
+            </div>
+          )}
           <Button 
             variant="outline" 
             size="sm" 
@@ -261,14 +441,115 @@ export function WeChatDataList() {
             <RefreshCw className={`h-4 w-4 ${isFetching ? 'animate-spin' : ''}`} />
             <span className="ml-2 hidden sm:inline">刷新</span>
           </Button>
+          {/* 重新采集按钮 */}
           <Button 
             variant="outline" 
-            size="sm"
-            className="h-9 px-3 border-slate-200 dark:border-slate-700"
+            size="sm" 
+            onClick={handleRefetchContent}
+            disabled={isRefetching || selectedArticles.size === 0 || selectedArticles.size > 20}
+            className={`h-9 px-3 ${
+              selectedArticles.size > 0 && selectedArticles.size <= 20
+                ? 'border-blue-500 text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-900/20' 
+                : 'border-slate-200 dark:border-slate-700'
+            }`}
+            title={selectedArticles.size > 20 ? '单次最多采集20篇' : '重新采集选中文章的内容'}
           >
-            <Download className="h-4 w-4" />
-            <span className="ml-2 hidden sm:inline">导出</span>
+            {isRefetching ? (
+              <RotateCw className="h-4 w-4 animate-spin" />
+            ) : (
+              <RotateCw className="h-4 w-4" />
+            )}
+            <span className="ml-2 hidden sm:inline">
+              {isRefetching ? '采集中...' : '采集内容'}
+            </span>
           </Button>
+          {/* 导出下拉菜单 */}
+          <div className="relative" ref={exportDropdownRef}>
+            <Button 
+              variant={selectedArticles.size > 0 ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setExportDropdownOpen(!exportDropdownOpen)}
+              disabled={isExporting || selectedArticles.size === 0}
+              className={`h-9 px-3 ${
+                selectedArticles.size > 0 
+                  ? 'bg-green-600 hover:bg-green-700 text-white border-green-600' 
+                  : 'border-slate-200 dark:border-slate-700'
+              }`}
+            >
+              {isExporting ? (
+                <RefreshCw className="h-4 w-4 animate-spin" />
+              ) : (
+                <FileSpreadsheet className="h-4 w-4" />
+              )}
+              <span className="ml-2 hidden sm:inline">
+                {selectedArticles.size > 0 ? `导出 (${selectedArticles.size})` : '导出'}
+              </span>
+              <ChevronDown className={`ml-1 h-3 w-3 transition-transform ${exportDropdownOpen ? 'rotate-180' : ''}`} />
+            </Button>
+            
+            {/* 导出格式下拉菜单 */}
+            {exportDropdownOpen && selectedArticles.size > 0 && (
+              <div className="absolute top-full right-0 mt-1 w-56 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-lg z-50 overflow-hidden">
+                <div className="px-3 py-2 border-b border-slate-100 dark:border-slate-700">
+                  <span className="text-xs text-slate-500">选择导出格式</span>
+                </div>
+                <div className="py-1">
+                  {/* CSV - 仅元数据 */}
+                  <button
+                    onClick={handleExportCSV}
+                    className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors text-left"
+                  >
+                    <FileSpreadsheet className="h-4 w-4 text-green-500" />
+                    <div>
+                      <div className="text-sm font-medium text-slate-700 dark:text-slate-200">CSV 表格</div>
+                      <div className="text-xs text-slate-500">仅导出元数据（标题、阅读量等）</div>
+                    </div>
+                  </button>
+                  
+                  {/* HTML - 完整内容 */}
+                  <button
+                    onClick={() => handleExportContent('html')}
+                    className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors text-left"
+                  >
+                    <FileCode className="h-4 w-4 text-orange-500" />
+                    <div>
+                      <div className="text-sm font-medium text-slate-700 dark:text-slate-200">HTML 文件</div>
+                      <div className="text-xs text-slate-500">导出完整文章内容（网页格式）</div>
+                    </div>
+                  </button>
+                  
+                  {/* Markdown - 完整内容 */}
+                  <button
+                    onClick={() => handleExportContent('markdown')}
+                    className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors text-left"
+                  >
+                    <FileText className="h-4 w-4 text-blue-500" />
+                    <div>
+                      <div className="text-sm font-medium text-slate-700 dark:text-slate-200">Markdown 文件</div>
+                      <div className="text-xs text-slate-500">导出完整文章内容（MD格式）</div>
+                    </div>
+                  </button>
+                  
+                  {/* JSON - 完整数据 */}
+                  <button
+                    onClick={() => handleExportContent('json')}
+                    className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors text-left"
+                  >
+                    <FileJson className="h-4 w-4 text-purple-500" />
+                    <div>
+                      <div className="text-sm font-medium text-slate-700 dark:text-slate-200">JSON 数据</div>
+                      <div className="text-xs text-slate-500">导出完整数据（含内容和元数据）</div>
+                    </div>
+                  </button>
+                </div>
+                <div className="px-3 py-2 border-t border-slate-100 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/50">
+                  <p className="text-xs text-slate-500">
+                    💡 HTML/MD/JSON 需要先启用"下载文章内容"选项采集
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -310,12 +591,53 @@ export function WeChatDataList() {
         {/* 文章列表 */}
         {articles.length > 0 && (
           <div className="divide-y divide-slate-100 dark:divide-slate-800">
+            {/* 全选栏 */}
+            <div className="flex items-center gap-3 px-4 py-2 bg-slate-50/80 dark:bg-slate-800/30 border-b border-slate-100 dark:border-slate-800">
+              <button
+                onClick={() => {
+                  if (isAllCurrentPageSelected) {
+                    deselectAllCurrentPage()
+                  } else {
+                    selectAllCurrentPage()
+                  }
+                }}
+                className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400 hover:text-green-600 dark:hover:text-green-400 transition-colors"
+              >
+                {isAllCurrentPageSelected ? (
+                  <CheckSquare className="h-4 w-4 text-green-500" />
+                ) : isSomeCurrentPageSelected ? (
+                  <MinusSquare className="h-4 w-4 text-green-500" />
+                ) : (
+                  <Square className="h-4 w-4" />
+                )}
+                <span>{isAllCurrentPageSelected ? '取消全选' : '全选当前页'}</span>
+              </button>
+              {selectedArticles.size > 0 && (
+                <span className="text-xs text-slate-500">
+                  (跨页已选 {selectedArticles.size} 篇)
+                </span>
+              )}
+            </div>
             {articles.map((article: WeChatArticleItem) => (
               <article 
                 key={article.id} 
-                className="group px-4 py-4 hover:bg-slate-50/80 dark:hover:bg-slate-800/50 transition-colors duration-150"
+                className={`group px-4 py-4 hover:bg-slate-50/80 dark:hover:bg-slate-800/50 transition-colors duration-150 ${
+                  selectedArticles.has(article.id) ? 'bg-green-50/50 dark:bg-green-900/10' : ''
+                }`}
               >
                 <div className="flex items-start gap-4">
+                  {/* 复选框 */}
+                  <button
+                    onClick={() => toggleArticleSelection(article.id)}
+                    className="flex-shrink-0 mt-1"
+                  >
+                    {selectedArticles.has(article.id) ? (
+                      <CheckSquare className="h-5 w-5 text-green-500" />
+                    ) : (
+                      <Square className="h-5 w-5 text-slate-300 dark:text-slate-600 hover:text-green-500 transition-colors" />
+                    )}
+                  </button>
+                  
                   {/* 封面图 (如果有) */}
                   {article.cover && (
                     <div className="flex-shrink-0 w-24 h-16 rounded-md overflow-hidden bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
