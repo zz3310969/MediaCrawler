@@ -372,6 +372,8 @@ def clean_html_for_export(html_content: str, url_map: Dict[str, str]) -> Tuple[s
     
     # 提取 CSS 链接（只包含已下载的本地 CSS）- 在删除 head 之前提取
     css_links = []
+    
+    # 方法1：从 HTML 中的 link 标签提取
     for link in soup.find_all('link'):
         # 检查是否是 stylesheet
         rel = link.get('rel', [])
@@ -383,16 +385,33 @@ def clean_html_for_export(html_content: str, url_map: Dict[str, str]) -> Tuple[s
         href = link.get('href', '')
         if href:
             original_href = href
+            # 尝试多种 URL 格式
+            urls_to_try = [href]
             if href.startswith('//'):
-                href = 'https:' + href
-            # 只添加已下载到本地的 CSS
-            if href in url_map:
-                css_links.append(url_map[href])
-                utils.logger.debug(f"[WeChatAPI] CSS link mapped: {original_href} -> {url_map[href]}")
+                urls_to_try.append('https:' + href)
+                urls_to_try.append('http:' + href)
+            elif href.startswith('https://'):
+                urls_to_try.append('//' + href[8:])
+            elif href.startswith('http://'):
+                urls_to_try.append('//' + href[7:])
+            
+            for url in urls_to_try:
+                if url in url_map:
+                    css_links.append(url_map[url])
+                    utils.logger.debug(f"[WeChatAPI] CSS link mapped: {original_href} -> {url_map[url]}")
+                    break
             else:
                 utils.logger.debug(f"[WeChatAPI] CSS link not in url_map: {href}")
     
-    utils.logger.info(f"[WeChatAPI] Found {len(css_links)} CSS links in url_map")
+    # 方法2：如果从 HTML 中提取的 CSS 链接为空，直接从 url_map 中获取所有 CSS 文件
+    if not css_links:
+        utils.logger.info("[WeChatAPI] No CSS links found from HTML, getting from url_map directly")
+        for url, local_path in url_map.items():
+            if local_path.endswith('.css'):
+                css_links.append(local_path)
+                utils.logger.debug(f"[WeChatAPI] CSS from url_map: {url} -> {local_path}")
+    
+    utils.logger.info(f"[WeChatAPI] Found {len(css_links)} CSS links")
     
     # ===== 查找主内容区域 #js_article =====
     js_article = soup.find(id='js_article')
@@ -632,7 +651,11 @@ def _clean_html_regex_fallback(html_content: str, url_map: Dict[str, str]) -> Tu
     # 替换资源 URL
     result = replace_resources_in_html(result, url_map)
     
-    return result, '', []
+    # 从 url_map 中获取所有 CSS 文件
+    css_links = [local_path for url, local_path in url_map.items() if local_path.endswith('.css')]
+    utils.logger.info(f"[WeChatAPI] Regex fallback: Found {len(css_links)} CSS files from url_map")
+    
+    return result, '', css_links
 
 
 def generate_final_html(title: str, page_content: str, body_class: str, css_links: List[str]) -> str:
