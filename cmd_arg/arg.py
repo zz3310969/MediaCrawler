@@ -46,6 +46,7 @@ class PlatformEnum(str, Enum):
     WEIBO = "wb"
     TIEBA = "tieba"
     ZHIHU = "zhihu"
+    WECHAT = "wechat"
 
 
 class LoginTypeEnum(str, Enum):
@@ -63,6 +64,7 @@ class CrawlerTypeEnum(str, Enum):
     DETAIL = "detail"
     CREATOR = "creator"
     CREATOR_VIP = "creator_vip"  # VIP exclusive content from creators (Weibo only)
+    ALBUM = "album"  # WeChat album mode
 
 
 class SaveDataOptionEnum(str, Enum):
@@ -284,6 +286,71 @@ async def parse_cmd(argv: Optional[Sequence[str]] = None):
                 rich_help_panel="Incremental Configuration",
             ),
         ] = config.CREATOR_EARLY_STOP_THRESHOLD,
+        # 微信专用参数
+        wechat_enable_content: Annotated[
+            str,
+            typer.Option(
+                "--wechat_enable_content",
+                help="[WeChat] Whether to download article HTML content",
+                rich_help_panel="WeChat Configuration",
+            ),
+        ] = "false",
+        wechat_enable_stats: Annotated[
+            str,
+            typer.Option(
+                "--wechat_enable_stats",
+                help="[WeChat] Whether to fetch reading stats (requires credentials)",
+                rich_help_panel="WeChat Configuration",
+            ),
+        ] = "false",
+        wechat_enable_export: Annotated[
+            str,
+            typer.Option(
+                "--wechat_enable_export",
+                help="[WeChat] Whether to enable article export",
+                rich_help_panel="WeChat Configuration",
+            ),
+        ] = "false",
+        wechat_export_format: Annotated[
+            str,
+            typer.Option(
+                "--wechat_export_format",
+                help="[WeChat] Export format (html | markdown | txt | docx)",
+                rich_help_panel="WeChat Configuration",
+            ),
+        ] = "html",
+        wechat_album_ids: Annotated[
+            str,
+            typer.Option(
+                "--wechat_album_ids",
+                help="[WeChat] Album IDs for album mode, format: biz:album_id, comma-separated",
+                rich_help_panel="WeChat Configuration",
+            ),
+        ] = "",
+        wechat_uin: Annotated[
+            str,
+            typer.Option(
+                "--wechat_uin",
+                help="[WeChat] Credential uin for fetching comments and stats",
+                rich_help_panel="WeChat Configuration",
+            ),
+        ] = "",
+        wechat_key: Annotated[
+            str,
+            typer.Option(
+                "--wechat_key",
+                help="[WeChat] Credential key for fetching comments and stats",
+                rich_help_panel="WeChat Configuration",
+            ),
+        ] = "",
+        wechat_pass_ticket: Annotated[
+            str,
+            typer.Option(
+                "--wechat_pass_ticket",
+                help="[WeChat] Credential pass_ticket for fetching comments and stats",
+                rich_help_panel="WeChat Configuration",
+            ),
+        ] = "",
     ) -> SimpleNamespace:
         """MediaCrawler 命令行入口"""
 
@@ -345,6 +412,30 @@ async def parse_cmd(argv: Optional[Sequence[str]] = None):
             if platform == PlatformEnum.WEIBO:
                 config.WEIBO_VIP_CREATOR_ID_LIST = vip_creator_id_list
 
+        # 微信参数处理
+        enable_wechat_content = _to_bool(wechat_enable_content)
+        enable_wechat_stats = _to_bool(wechat_enable_stats)
+        enable_wechat_export = _to_bool(wechat_enable_export)
+        
+        # 如果是微信平台，设置相关配置
+        if platform == PlatformEnum.WECHAT:
+            try:
+                from config import wechat_config
+                wechat_config.ENABLE_GET_ARTICLE_HTML = enable_wechat_content
+                wechat_config.ENABLE_GET_READING_STATS = enable_wechat_stats
+                wechat_config.ENABLE_EXPORT = enable_wechat_export
+                wechat_config.EXPORT_FORMAT = wechat_export_format
+                if wechat_album_ids:
+                    wechat_config.WECHAT_ALBUM_IDS = [aid.strip() for aid in wechat_album_ids.split(",") if aid.strip()]
+                if wechat_uin:
+                    wechat_config.WECHAT_CREDENTIALS_UIN = wechat_uin
+                if wechat_key:
+                    wechat_config.WECHAT_CREDENTIALS_KEY = wechat_key
+                if wechat_pass_ticket:
+                    wechat_config.WECHAT_CREDENTIALS_PASS_TICKET = wechat_pass_ticket
+            except ImportError:
+                pass
+
         return SimpleNamespace(
             platform=config.PLATFORM,
             lt=config.LOGIN_TYPE,
@@ -362,6 +453,12 @@ async def parse_cmd(argv: Optional[Sequence[str]] = None):
             vip_creator_id=vip_creator_id,
             enable_incremental=config.ENABLE_INCREMENTAL_CRAWL,
             incremental_threshold=config.CREATOR_EARLY_STOP_THRESHOLD,
+            # 微信相关
+            wechat_enable_content=enable_wechat_content,
+            wechat_enable_stats=enable_wechat_stats,
+            wechat_enable_export=enable_wechat_export,
+            wechat_export_format=wechat_export_format,
+            wechat_album_ids=wechat_album_ids,
         )
 
     command = typer.main.get_command(app)

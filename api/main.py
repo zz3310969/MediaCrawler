@@ -230,6 +230,7 @@ async def get_platforms():
             {"value": "ks", "label": "Kuaishou", "icon": "video"},
             {"value": "bili", "label": "Bilibili", "icon": "tv"},
             {"value": "wb", "label": "Weibo", "icon": "message-circle"},
+            {"value": "wechat", "label": "WeChat MP", "icon": "message-square"},
             {"value": "tieba", "label": "Baidu Tieba", "icon": "messages-square"},
             {"value": "zhihu", "label": "Zhihu", "icon": "help-circle"},
         ]
@@ -242,6 +243,7 @@ async def get_config_options():
     return {
         "login_types": [
             {"value": "qrcode", "label": "QR Code Login"},
+            {"value": "mp_qrcode", "label": "WeChat MP Backend Login"},
             {"value": "cookie", "label": "Cookie Login"},
         ],
         "crawler_types": [
@@ -249,6 +251,7 @@ async def get_config_options():
             {"value": "detail", "label": "Detail Mode"},
             {"value": "creator", "label": "Creator Mode"},
             {"value": "creator_vip", "label": "VIP Content Mode (Weibo)"},
+            {"value": "album", "label": "Album Mode (WeChat)"},
         ],
         "save_options": [
             {"value": "json", "label": "JSON File"},

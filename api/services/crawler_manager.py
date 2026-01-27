@@ -237,6 +237,25 @@ class CrawlerManager:
             cmd.extend(["--enable_incremental", "true"])
             if config.incremental_early_stop != 3:  # 只在非默认值时传递
                 cmd.extend(["--incremental_threshold", str(config.incremental_early_stop)])
+        
+        # 微信专用参数
+        if config.platform.value == "wechat":
+            if config.wechat_enable_content:
+                cmd.extend(["--wechat_enable_content", "true"])
+            if config.wechat_enable_reading_stats:
+                cmd.extend(["--wechat_enable_stats", "true"])
+            if config.wechat_enable_export:
+                cmd.extend(["--wechat_enable_export", "true"])
+                if config.wechat_export_format:
+                    cmd.extend(["--wechat_export_format", config.wechat_export_format])
+            if config.wechat_album_ids:
+                cmd.extend(["--wechat_album_ids", config.wechat_album_ids])
+            if config.wechat_credentials_uin:
+                cmd.extend(["--wechat_uin", config.wechat_credentials_uin])
+            if config.wechat_credentials_key:
+                cmd.extend(["--wechat_key", config.wechat_credentials_key])
+            if config.wechat_credentials_pass_ticket:
+                cmd.extend(["--wechat_pass_ticket", config.wechat_credentials_pass_ticket])
 
         return cmd
 

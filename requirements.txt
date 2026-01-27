@@ -16,6 +16,7 @@ wordcloud==1.9.3
 matplotlib==3.9.0
 requests==2.32.3
 parsel==1.9.1
+beautifulsoup4==4.12.3
 pyexecjs==1.5.1
 pandas==2.2.3
 aiosqlite==0.21.0

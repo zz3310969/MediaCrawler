@@ -21,6 +21,15 @@ const DEFAULT_CONFIG: CrawlerStartRequest = {
   // 增量爬取配置
   enable_incremental: false,
   incremental_early_stop: 3,
+  // 微信专用配置
+  wechat_enable_content: false,
+  wechat_enable_reading_stats: false,
+  wechat_enable_export: false,
+  wechat_export_format: 'html',
+  wechat_album_ids: '',
+  wechat_credentials_uin: '',
+  wechat_credentials_key: '',
+  wechat_credentials_pass_ticket: '',
 }
 
 export function useCrawlerConfig() {
@@ -59,6 +68,7 @@ export function useCrawlerConfig() {
       keywords: '',
       specified_ids: '',
       creator_ids: '',
+      wechat_album_ids: '',
     }))
   }, [])
 

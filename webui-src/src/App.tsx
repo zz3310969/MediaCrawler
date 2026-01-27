@@ -3,12 +3,14 @@ import { AlertTriangle } from 'lucide-react'
 import { TargetConfig } from './components/TargetConfig'
 import { LoginConfig } from './components/LoginConfig'
 import { OutputConfig } from './components/OutputConfig'
+import { WeChatConfig } from './components/WeChatConfig'
+import { ProgressPanel } from './components/ProgressPanel'
 import { TerminalLog } from './components/TerminalLog'
 import { ThemeToggle } from './components/ThemeToggle'
 import { ToastContainer, toast } from './components/ui/toast'
 import { Button } from './components/ui/button'
 import { useCrawlerConfig } from './hooks/useCrawlerConfig'
-import { crawlerApi } from './api/crawler'
+import { crawlerApi, type CrawlerType } from './api/crawler'
 import { QUERY_CONFIG } from './lib/constants'
 
 const queryClient = new QueryClient({
@@ -117,24 +119,83 @@ function MainApp() {
 
       {/* 主内容区 */}
       <main className="flex-1 container mx-auto px-6 py-3 overflow-y-auto">
+        {/* 平台选择横条 */}
+        <div className="flex items-center gap-2 mb-3 p-2 bg-white/50 dark:bg-slate-900/50 rounded-lg border border-slate-200 dark:border-slate-700">
+          <span className="text-sm font-medium text-slate-600 dark:text-slate-400 mr-2">平台:</span>
+          {[
+            { value: 'xhs', label: '小红书', icon: '🔴' },
+            { value: 'dy', label: '抖音', icon: '🎵' },
+            { value: 'ks', label: '快手', icon: '⚡' },
+            { value: 'bili', label: 'B站', icon: '📺' },
+            { value: 'wb', label: '微博', icon: '🔷' },
+            { value: 'wechat', label: '微信公众号', icon: '💬' },
+            { value: 'tieba', label: '贴吧', icon: '🗣️' },
+            { value: 'zhihu', label: '知乎', icon: '💡' },
+          ].map((p) => (
+            <button
+              key={p.value}
+              onClick={() => updateConfig({ platform: p.value as any })}
+              disabled={isRunning}
+              className={`px-3 py-1.5 text-xs rounded-md transition-all ${
+                config.platform === p.value
+                  ? 'bg-gradient-to-r from-cyan-500 to-blue-500 text-white shadow-md'
+                  : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'
+              } ${isRunning ? 'opacity-50 cursor-not-allowed' : ''}`}
+            >
+              {p.icon} {p.label}
+            </button>
+          ))}
+        </div>
+
+        {/* 进度面板 */}
+        <ProgressPanel 
+          progress={status?.progress}
+          isRunning={isRunning}
+          platform={config.platform}
+        />
+
         {/* 三列配置卡片 */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
-          {/* 目标配置 */}
-          <TargetConfig
-            platform={config.platform}
-            crawlerType={config.crawler_type}
-            keywords={config.keywords || ''}
-            specifiedIds={config.specified_ids || ''}
-            creatorIds={config.creator_ids || ''}
-            startPage={config.start_page || 1}
-            disabled={isRunning}
-            onPlatformChange={(value) => updateConfig({ platform: value })}
-            onCrawlerTypeChange={handleCrawlerTypeChange}
-            onKeywordsChange={(value) => updateConfig({ keywords: value })}
-            onSpecifiedIdsChange={(value) => updateConfig({ specified_ids: value })}
-            onCreatorIdsChange={(value) => updateConfig({ creator_ids: value })}
-            onStartPageChange={(value) => updateConfig({ start_page: value })}
-          />
+          {/* 目标配置 - 微信平台显示专用配置 */}
+          {config.platform === 'wechat' ? (
+            <WeChatConfig
+              crawlerType={config.crawler_type}
+              enableContent={config.wechat_enable_content || false}
+              enableReadingStats={config.wechat_enable_reading_stats || false}
+              enableExport={config.wechat_enable_export || false}
+              exportFormat={config.wechat_export_format || 'html'}
+              albumIds={config.wechat_album_ids || ''}
+              credentialsUin={config.wechat_credentials_uin || ''}
+              credentialsKey={config.wechat_credentials_key || ''}
+              credentialsPassTicket={config.wechat_credentials_pass_ticket || ''}
+              disabled={isRunning}
+              onCrawlerTypeChange={(value: CrawlerType) => handleCrawlerTypeChange(value)}
+              onEnableContentChange={(value) => updateConfig({ wechat_enable_content: value })}
+              onEnableReadingStatsChange={(value) => updateConfig({ wechat_enable_reading_stats: value })}
+              onEnableExportChange={(value) => updateConfig({ wechat_enable_export: value })}
+              onExportFormatChange={(value) => updateConfig({ wechat_export_format: value as 'html' | 'markdown' | 'txt' | 'docx' | 'json' | 'excel' })}
+              onAlbumIdsChange={(value) => updateConfig({ wechat_album_ids: value })}
+              onCredentialsUinChange={(value) => updateConfig({ wechat_credentials_uin: value })}
+              onCredentialsKeyChange={(value) => updateConfig({ wechat_credentials_key: value })}
+              onCredentialsPassTicketChange={(value) => updateConfig({ wechat_credentials_pass_ticket: value })}
+            />
+          ) : (
+            <TargetConfig
+              platform={config.platform}
+              crawlerType={config.crawler_type}
+              keywords={config.keywords || ''}
+              specifiedIds={config.specified_ids || ''}
+              creatorIds={config.creator_ids || ''}
+              startPage={config.start_page || 1}
+              disabled={isRunning}
+              onPlatformChange={(value) => updateConfig({ platform: value })}
+              onCrawlerTypeChange={handleCrawlerTypeChange}
+              onKeywordsChange={(value) => updateConfig({ keywords: value })}
+              onSpecifiedIdsChange={(value) => updateConfig({ specified_ids: value })}
+              onCreatorIdsChange={(value) => updateConfig({ creator_ids: value })}
+              onStartPageChange={(value) => updateConfig({ start_page: value })}
+            />
+          )}
 
           {/* 登录配置 */}
           <LoginConfig

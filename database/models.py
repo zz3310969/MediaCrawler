@@ -506,3 +506,90 @@ class IncrementalMetadata(Base):
     __table_args__ = (
         Index('idx_platform_type_target', 'platform', 'crawler_type', 'target_key', unique=True),
     )
+
+
+class WeChatArticle(Base):
+    """微信公众号文章表"""
+    __tablename__ = 'wechat_article'
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    article_id = Column(String(128), nullable=False, index=True, unique=True, comment='文章ID')
+    title = Column(Text, comment='文章标题')
+    link = Column(Text, comment='文章链接')
+    cover = Column(Text, comment='封面图片URL')
+    digest = Column(Text, comment='文章摘要')
+    create_time = Column(BigInteger, comment='创建时间戳')
+    update_time = Column(BigInteger, comment='更新时间戳')
+    author = Column(String(255), comment='作者')
+    fakeid = Column(String(128), index=True, comment='公众号fakeid')
+    account_name = Column(String(255), comment='公众号名称')
+    content = Column(Text, comment='文章HTML内容')
+    read_num = Column(Integer, default=0, comment='阅读量')
+    like_num = Column(Integer, default=0, comment='在看数')
+    old_like_num = Column(Integer, default=0, comment='点赞数（旧版）')
+    share_num = Column(Integer, default=0, comment='分享数')
+    comment_count = Column(Integer, default=0, comment='评论数')
+    source_keyword = Column(String(255), default='', comment='来源关键词')
+    add_ts = Column(BigInteger, comment='添加时间戳')
+    last_modify_ts = Column(BigInteger, comment='最后修改时间戳')
+    
+    __table_args__ = (
+        Index('idx_fakeid_create_time', 'fakeid', 'create_time'),
+        Index('idx_create_time', 'create_time'),
+    )
+
+
+class WeChatComment(Base):
+    """微信文章评论表"""
+    __tablename__ = 'wechat_comment'
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    comment_id = Column(String(128), nullable=False, index=True, unique=True, comment='评论ID')
+    article_id = Column(String(128), index=True, comment='文章ID')
+    content = Column(Text, comment='评论内容')
+    create_time = Column(BigInteger, comment='评论时间戳')
+    like_num = Column(Integer, default=0, comment='点赞数')
+    nick_name = Column(String(255), comment='评论者昵称')
+    logo_url = Column(Text, comment='评论者头像URL')
+    add_ts = Column(BigInteger, comment='添加时间戳')
+    last_modify_ts = Column(BigInteger, comment='最后修改时间戳')
+    
+    __table_args__ = (
+        Index('idx_article_id', 'article_id'),
+        Index('idx_create_time', 'create_time'),
+    )
+
+
+class WeChatCommentReply(Base):
+    """微信评论回复表"""
+    __tablename__ = 'wechat_comment_reply'
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    reply_id = Column(String(128), nullable=False, index=True, unique=True, comment='回复ID')
+    comment_id = Column(String(128), index=True, comment='评论ID')
+    article_id = Column(String(128), index=True, comment='文章ID')
+    content = Column(Text, comment='回复内容')
+    create_time = Column(BigInteger, comment='回复时间戳')
+    like_num = Column(Integer, default=0, comment='点赞数')
+    nick_name = Column(String(255), comment='回复者昵称')
+    add_ts = Column(BigInteger, comment='添加时间戳')
+    last_modify_ts = Column(BigInteger, comment='最后修改时间戳')
+    
+    __table_args__ = (
+        Index('idx_comment_id', 'comment_id'),
+        Index('idx_article_id', 'article_id'),
+    )
+
+
+class WeChatAccount(Base):
+    """微信公众号信息表"""
+    __tablename__ = 'wechat_account'
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    fakeid = Column(String(128), nullable=False, index=True, unique=True, comment='公众号fakeid')
+    nickname = Column(String(255), comment='公众号名称')
+    alias = Column(String(255), comment='公众号别名')
+    round_head_img = Column(Text, comment='公众号头像URL')
+    service_type = Column(Integer, default=0, comment='公众号类型')
+    add_ts = Column(BigInteger, comment='添加时间戳')
+    last_modify_ts = Column(BigInteger, comment='最后修改时间戳')

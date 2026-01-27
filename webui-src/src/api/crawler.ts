@@ -2,9 +2,9 @@
 import { client } from './client'
 
 // 类型定义（对应后端的Schema）
-export type Platform = 'xhs' | 'dy' | 'ks' | 'bili' | 'wb' | 'tieba' | 'zhihu'
-export type LoginType = 'qrcode' | 'phone' | 'cookie'
-export type CrawlerType = 'search' | 'detail' | 'creator' | 'creator_vip'
+export type Platform = 'xhs' | 'dy' | 'ks' | 'bili' | 'wb' | 'wechat' | 'tieba' | 'zhihu'
+export type LoginType = 'qrcode' | 'phone' | 'cookie' | 'mp_qrcode'
+export type CrawlerType = 'search' | 'detail' | 'creator' | 'creator_vip' | 'album'
 export type SaveOption = 'json' | 'csv' | 'db' | 'sqlite' | 'mongodb' | 'excel'
 
 export interface CrawlerStartRequest {
@@ -24,6 +24,15 @@ export interface CrawlerStartRequest {
   // 增量爬取配置
   enable_incremental?: boolean  // 是否启用增量爬取
   incremental_early_stop?: number  // 早停阈值
+  // 微信专用配置
+  wechat_enable_content?: boolean  // 是否下载文章HTML内容
+  wechat_enable_reading_stats?: boolean  // 是否获取阅读量
+  wechat_enable_export?: boolean  // 是否启用导出
+  wechat_export_format?: 'html' | 'markdown' | 'txt' | 'docx' | 'json' | 'excel'  // 导出格式
+  wechat_album_ids?: string  // 合集ID列表
+  wechat_credentials_uin?: string  // 微信凭证 uin
+  wechat_credentials_key?: string  // 微信凭证 key
+  wechat_credentials_pass_ticket?: string  // 微信凭证 pass_ticket
 }
 
 export interface CrawlerStatus {
@@ -32,6 +41,19 @@ export interface CrawlerStatus {
   crawler_type?: string
   started_at?: string
   error_message?: string
+  // 进度信息
+  progress?: CrawlerProgress
+}
+
+export interface CrawlerProgress {
+  articles_crawled?: number
+  articles_total?: number
+  comments_crawled?: number
+  resources_downloaded?: number
+  exports_completed?: number
+  current_account?: string
+  current_album?: string
+  percentage?: number
 }
 
 export interface LogEntry {

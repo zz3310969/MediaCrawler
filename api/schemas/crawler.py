@@ -28,6 +28,7 @@ class PlatformEnum(str, Enum):
     KUAISHOU = "ks"
     BILIBILI = "bili"
     WEIBO = "wb"
+    WECHAT = "wechat"
     TIEBA = "tieba"
     ZHIHU = "zhihu"
 
@@ -37,6 +38,7 @@ class LoginTypeEnum(str, Enum):
     QRCODE = "qrcode"
     PHONE = "phone"
     COOKIE = "cookie"
+    MP_QRCODE = "mp_qrcode"  # WeChat MP backend login
 
 
 class CrawlerTypeEnum(str, Enum):
@@ -45,6 +47,7 @@ class CrawlerTypeEnum(str, Enum):
     DETAIL = "detail"
     CREATOR = "creator"
     CREATOR_VIP = "creator_vip"  # VIP exclusive content from creators (Weibo only)
+    ALBUM = "album"  # WeChat album mode
 
 
 class SaveDataOptionEnum(str, Enum):
@@ -54,6 +57,16 @@ class SaveDataOptionEnum(str, Enum):
     JSON = "json"
     SQLITE = "sqlite"
     MONGODB = "mongodb"
+    EXCEL = "excel"
+
+
+class ExportFormatEnum(str, Enum):
+    """Export format options"""
+    HTML = "html"
+    MARKDOWN = "markdown"
+    TXT = "txt"
+    DOCX = "docx"
+    JSON = "json"
     EXCEL = "excel"
 
 
@@ -75,6 +88,16 @@ class CrawlerStartRequest(BaseModel):
     # 增量爬取配置
     enable_incremental: bool = False  # 是否启用增量爬取（只爬取新内容）
     incremental_early_stop: int = 3  # 早停阈值（连续N条已存在内容就停止）
+    
+    # 微信专用配置
+    wechat_enable_content: bool = False  # 是否下载文章HTML内容
+    wechat_enable_reading_stats: bool = False  # 是否获取阅读量
+    wechat_enable_export: bool = False  # 是否启用导出
+    wechat_export_format: Optional[str] = "html"  # 导出格式
+    wechat_album_ids: str = ""  # 合集ID列表，用于album模式
+    wechat_credentials_uin: str = ""  # 微信凭证 uin
+    wechat_credentials_key: str = ""  # 微信凭证 key
+    wechat_credentials_pass_ticket: str = ""  # 微信凭证 pass_ticket
 
 
 class CrawlerStatusResponse(BaseModel):
@@ -84,6 +107,19 @@ class CrawlerStatusResponse(BaseModel):
     crawler_type: Optional[str] = None
     started_at: Optional[str] = None
     error_message: Optional[str] = None
+    # 进度信息
+    progress: Optional[dict] = None  # 包含 current, total, percentage 等
+
+
+class WeChatProgressInfo(BaseModel):
+    """WeChat crawler progress information"""
+    articles_crawled: int = 0
+    articles_total: int = 0
+    comments_crawled: int = 0
+    resources_downloaded: int = 0
+    exports_completed: int = 0
+    current_account: Optional[str] = None
+    current_album: Optional[str] = None
 
 
 class LogEntry(BaseModel):
