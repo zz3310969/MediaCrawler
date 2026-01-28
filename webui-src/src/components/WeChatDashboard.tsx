@@ -97,15 +97,26 @@ export function WeChatDashboard() {
     if (status?.new_cookies && status.new_cookies !== config.cookies) {
       toast.success('登录成功！Cookie 已自动保存')
       updateConfig({ cookies: status.new_cookies })
+      // 登录成功，关闭弹窗
+      setLoginDialogOpen(false)
+      setQrcode('')
     }
     if (status?.new_token && status.new_token !== config.wechat_token) {
       toast.success('Token 已自动保存')
       updateConfig({ wechat_token: status.new_token })
     }
+    
+    // 如果状态变为 idle 且之前是 running，说明任务结束
     if (status?.status === 'idle' && isRunning) {
       setIsRunning(false)
-      setLoginDialogOpen(false)
-      setQrcode('')
+      // 如果是登录任务结束但还没获取到 Cookie，可能是失败了或者用户手动关闭
+      // 这里不自动关闭弹窗，以免用户还没来得及扫码
+      
+      // 如果已登录，关闭弹窗 (防止重复逻辑)
+      if (config.cookies && config.wechat_token) {
+          setLoginDialogOpen(false)
+          setQrcode('')
+      }
     }
   }, [status?.new_cookies, status?.new_token, status?.status, config.cookies, config.wechat_token, isRunning, updateConfig])
   
@@ -275,7 +286,7 @@ export function WeChatDashboard() {
       }, 500);
       return () => clearTimeout(timer);
     }
-  }, [loginDialogOpen, isLoggedIn, isRunning, config.login_type, qrcode, startMutation.isPending]);
+  }, [loginDialogOpen, isLoggedIn, isRunning, config.login_type, qrcode, startMutation.isPending]); // 添加 loginDialogOpen 作为依赖
 
   return (
     <div className="flex h-[calc(100vh-60px)] gap-4 p-4 bg-slate-50/50 dark:bg-slate-950/50">
