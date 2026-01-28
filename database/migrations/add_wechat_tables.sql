@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS wechat_article (
     fakeid VARCHAR(128),                            -- 公众号唯一标识（用于关联公众号）
     account_name VARCHAR(255),                      -- 公众号名称
     content TEXT,                                   -- 文章正文内容（HTML格式）
+    content_path VARCHAR(512) DEFAULT '',           -- 文章内容文件路径（本地存储）
     read_num INTEGER DEFAULT 0,                     -- 阅读数
     like_num INTEGER DEFAULT 0,                     -- 点赞数（在看数）
     old_like_num INTEGER DEFAULT 0,                 -- 点赞数（旧版）

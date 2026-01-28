@@ -34,6 +34,7 @@ CREATE TABLE `wechat_article` (
     `fakeid` VARCHAR(128) DEFAULT NULL COMMENT '公众号唯一标识（用于关联公众号）',
     `account_name` VARCHAR(255) DEFAULT NULL COMMENT '公众号名称',
     `content` LONGTEXT COMMENT '文章正文内容（HTML格式）',
+    `content_path` VARCHAR(512) DEFAULT '' COMMENT '文章内容文件路径（本地存储）',
     `read_num` INT UNSIGNED DEFAULT 0 COMMENT '阅读数',
     `like_num` INT UNSIGNED DEFAULT 0 COMMENT '点赞数（在看数）',
     `old_like_num` INT UNSIGNED DEFAULT 0 COMMENT '点赞数（旧版）',
