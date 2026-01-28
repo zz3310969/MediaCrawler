@@ -438,7 +438,7 @@ async def parse_cmd(argv: Optional[Sequence[str]] = None):
         if platform == PlatformEnum.WECHAT:
             try:
                 from config import wechat_config
-                wechat_config.ENABLE_GET_ARTICLE_HTML = enable_wechat_content
+                wechat_config.ENABLE_GET_ARTICLE_CONTENT = enable_wechat_content  # 修复：配置名应为 ENABLE_GET_ARTICLE_CONTENT
                 wechat_config.ENABLE_GET_READING_STATS = enable_wechat_stats
                 wechat_config.ENABLE_EXPORT = enable_wechat_export
                 wechat_config.EXPORT_FORMAT = wechat_export_format

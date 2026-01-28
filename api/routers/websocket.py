@@ -66,6 +66,8 @@ async def log_broadcaster():
         try:
             # Get log entry from queue
             entry = await queue.get()
+            # Log broadcast message
+            print(f"[WS] Broadcasting log: {entry.message[:100]}...")
             # Broadcast to all WebSocket connections
             await manager.broadcast(entry.model_dump())
         except asyncio.CancelledError:

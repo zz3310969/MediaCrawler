@@ -49,18 +49,27 @@ class WeChatStoreFactory:
         return store_class()
 
 
-async def update_wechat_article(article_item: Dict):
+async def update_wechat_article(article_item: Dict) -> str:
     """
     保存微信文章
     
     Args:
         article_item: 文章数据字典
+        
+    Returns:
+        str: "inserted" 表示新增, "updated" 表示更新, "error" 表示失败
     """
     if not article_item:
-        return
+        utils.logger.warning(f"[store.wechat.update_wechat_article] ⚠️ 文章数据为空，跳过保存")
+        return "error"
     
     article_id = article_item.get("article_id", "")
     title = article_item.get("title", "Unknown")
+    fakeid = article_item.get("fakeid", "")
+    
+    if not article_id:
+        utils.logger.warning(f"[store.wechat.update_wechat_article] ⚠️ 文章ID为空，跳过保存: title={title[:30]}")
+        return "error"
     
     save_item = {
         "article_id": article_id,
@@ -71,7 +80,7 @@ async def update_wechat_article(article_item: Dict):
         "create_time": article_item.get("create_time", 0),
         "update_time": article_item.get("update_time", 0),
         "author": article_item.get("author", ""),
-        "fakeid": article_item.get("fakeid", ""),
+        "fakeid": fakeid,
         "account_name": article_item.get("account_name", ""),
         "content": article_item.get("content", ""),
         "read_num": article_item.get("read_num", 0),
@@ -81,8 +90,22 @@ async def update_wechat_article(article_item: Dict):
         "source_keyword": source_keyword_var.get(),
     }
     
-    utils.logger.info(f"[store.wechat.update_wechat_article] article: {article_id}, title: {title[:30]}")
-    await WeChatStoreFactory.create_store().store_content(content_item=save_item)
+    utils.logger.info(f"[store.wechat.update_wechat_article] 准备保存: id={article_id}, fakeid={fakeid}, title={title[:30]}")
+    
+    try:
+        result = await WeChatStoreFactory.create_store().store_content(content_item=save_item)
+        if result == "inserted":
+            utils.logger.info(f"[store.wechat.update_wechat_article] ✅ 新增成功: id={article_id}")
+        elif result == "updated":
+            utils.logger.info(f"[store.wechat.update_wechat_article] ✅ 更新成功: id={article_id}")
+        else:
+            utils.logger.warning(f"[store.wechat.update_wechat_article] ⚠️ 保存结果未知: id={article_id}, result={result}")
+        return result or "error"
+    except Exception as e:
+        utils.logger.error(f"[store.wechat.update_wechat_article] ❌ 保存失败: id={article_id}, error={e}")
+        import traceback
+        utils.logger.error(f"[store.wechat.update_wechat_article] 堆栈信息: {traceback.format_exc()}")
+        raise  # 重新抛出异常，让上层知道保存失败
 
 
 async def batch_update_wechat_articles(article_list: List[Dict]):

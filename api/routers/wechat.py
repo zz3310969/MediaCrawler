@@ -79,6 +79,27 @@ class AccountItem(BaseModel):
     fakeid: str
     account_name: str
     article_count: int
+    total_article_count: Optional[int] = 0
+    round_head_img: Optional[str] = None
+    alias: Optional[str] = None
+    service_type: Optional[int] = None
+    last_sync_time: Optional[int] = None
+
+
+class AddAccountRequest(BaseModel):
+    fakeid: str
+    nickname: str
+    alias: Optional[str] = ""
+    round_head_img: Optional[str] = ""
+    service_type: Optional[int] = 0
+    # 用于获取文章总数的认证信息（可选）
+    cookies: Optional[str] = None
+    token: Optional[str] = None
+
+
+class DeleteAccountRequest(BaseModel):
+    fakeid: str
+    delete_data: bool = False
 
 
 class ExportRequest(BaseModel):
@@ -568,6 +589,65 @@ def clean_html_for_export(html_content: str, url_map: Dict[str, str]) -> Tuple[s
     return page_content_html, body_class_str, css_links
 
 
+async def _fetch_account_total_count(fakeid: str, cookies: str, token: str) -> int:
+    """
+    获取公众号文章总数
+    
+    Args:
+        fakeid: 公众号 fakeid
+        cookies: 微信公众号平台 cookies
+        token: 微信公众号平台 token
+        
+    Returns:
+        文章总数
+    """
+    import json
+    
+    params = {
+        "sub": "list",
+        "search_field": "null",
+        "begin": 0,
+        "count": 1,  # 只需要获取总数，所以 count 设为 1
+        "query": "",
+        "fakeid": fakeid,
+        "type": "101_1",
+        "free_publish_type": 1,
+        "sub_action": "list_ex",
+        "token": token,
+        "lang": "zh_CN",
+        "f": "json",
+        "ajax": 1,
+    }
+    
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        "Cookie": cookies,
+        "Referer": "https://mp.weixin.qq.com/",
+    }
+    
+    async with httpx.AsyncClient(timeout=30) as client:
+        response = await client.get(
+            "https://mp.weixin.qq.com/cgi-bin/appmsgpublish",
+            params=params,
+            headers=headers,
+        )
+        
+        if response.status_code != 200:
+            raise Exception(f"HTTP error: {response.status_code}")
+        
+        data = response.json()
+        
+        base_resp = data.get("base_resp", {})
+        if base_resp.get("ret") != 0:
+            raise Exception(f"API error: {base_resp.get('ret')} - {base_resp.get('err_msg')}")
+        
+        # 解析 publish_page 获取 total_count
+        publish_page_str = data.get("publish_page", "{}")
+        publish_page = json.loads(publish_page_str)
+        
+        return publish_page.get("total_count", 0)
+
+
 def _clean_html_regex_fallback(html_content: str, url_map: Dict[str, str]) -> Tuple[str, str, List[str]]:
     """
     降级处理：使用正则清理 HTML（当 BeautifulSoup 不可用时）
@@ -709,41 +789,340 @@ def generate_final_html(title: str, page_content: str, body_class: str, css_link
 @router.get("/accounts", response_model=List[AccountItem])
 async def get_accounts():
     """
-    获取所有已采集的公众号列表（去重）
+    获取所有已采集的公众号列表（包括仅配置但未采集的）
     """
     try:
         from database.db_session import get_session
-        from database.models import WeChatArticle
-        from sqlalchemy import select, func, distinct
+        from database.models import WeChatArticle, WeChatAccount
+        from sqlalchemy import select, func, distinct, desc
         
         async with get_session() as session:
-            # 获取所有公众号及其文章数量
-            query = select(
+            # 1. 获取 WeChatAccount 表中的所有账号
+            account_query = select(WeChatAccount).order_by(WeChatAccount.add_ts.desc())
+            account_result = await session.execute(account_query)
+            db_accounts = account_result.scalars().all()
+            
+            # 转换为字典方便查找
+            accounts_map = {acc.fakeid: acc for acc in db_accounts}
+            
+            # 2. 统计文章数量和最后采集时间
+            stats_query = select(
                 WeChatArticle.fakeid,
-                WeChatArticle.account_name,
-                func.count(WeChatArticle.id).label('article_count')
+                func.count(WeChatArticle.id).label('article_count'),
+                func.max(WeChatArticle.create_time).label('last_sync_time'),
+                func.max(WeChatArticle.account_name).label('account_name') # Fallback name
             ).group_by(
-                WeChatArticle.fakeid,
-                WeChatArticle.account_name
-            ).order_by(
-                func.count(WeChatArticle.id).desc()
+                WeChatArticle.fakeid
             )
             
-            result = await session.execute(query)
-            accounts = result.all()
+            stats_result = await session.execute(stats_query)
+            stats_list = stats_result.all()
             
-            return [
-                AccountItem(
-                    fakeid=row.fakeid or "",
-                    account_name=row.account_name or "未知公众号",
-                    article_count=row.article_count or 0,
+            # 3. 合并数据
+            result_list = []
+            processed_fakeids = set()
+            
+            # 先处理有文章的账号 (可能是 db_accounts 里没有的，比如历史数据)
+            for row in stats_list:
+                fakeid = row.fakeid
+                if not fakeid: continue
+                
+                processed_fakeids.add(fakeid)
+                account = accounts_map.get(fakeid)
+                article_count = row.article_count or 0
+                
+                item = AccountItem(
+                    fakeid=fakeid,
+                    account_name=account.nickname if account and account.nickname else (row.account_name or "未知公众号"),
+                    article_count=article_count,
+                    round_head_img=account.round_head_img if account else None,
+                    alias=account.alias if account else None,
+                    service_type=account.service_type if account else None,
+                    total_article_count=account.total_article_count if account else 0,
+                    last_sync_time=row.last_sync_time or 0
                 )
-                for row in accounts
-                if row.fakeid  # 过滤掉空的 fakeid
-            ]
+                result_list.append(item)
+                
+            # 再处理只有账号没有文章的 (新增的)
+            for fakeid, account in accounts_map.items():
+                if fakeid not in processed_fakeids:
+                    item = AccountItem(
+                        fakeid=fakeid,
+                        account_name=account.nickname or "未知公众号",
+                        article_count=0,
+                        round_head_img=account.round_head_img,
+                        alias=account.alias,
+                        service_type=account.service_type,
+                        total_article_count=account.total_article_count or 0,
+                        last_sync_time=0
+                    )
+                    result_list.append(item)
+            
+            # 排序：有文章的按最后采集时间，无文章的按添加时间
+            result_list.sort(key=lambda x: (x.last_sync_time or 0, x.article_count), reverse=True)
+            
+            return result_list
             
     except Exception as e:
         utils.logger.error(f"[WeChatAPI] Get accounts failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/add_account")
+async def add_account(request: AddAccountRequest):
+    """添加公众号到管理列表"""
+    try:
+        from database.db_session import get_session
+        from database.models import WeChatAccount
+        from sqlalchemy import select, update
+        from tools import utils
+        import time
+        from config import wechat_config
+        
+        total_article_count = 0
+        
+        # 如果提供了认证信息，尝试获取文章总数
+        utils.logger.info(f"[WeChatAPI] add_account - cookies provided: {bool(request.cookies)}, token provided: {bool(request.token)}")
+        if request.cookies and request.token:
+            try:
+                utils.logger.info(f"[WeChatAPI] Fetching total_count for {request.nickname} (fakeid: {request.fakeid})")
+                total_article_count = await _fetch_account_total_count(
+                    fakeid=request.fakeid,
+                    cookies=request.cookies,
+                    token=request.token
+                )
+                utils.logger.info(f"[WeChatAPI] Got total_count for {request.nickname}: {total_article_count}")
+            except Exception as e:
+                utils.logger.warning(f"[WeChatAPI] Failed to get total_count for {request.nickname}: {e}")
+                import traceback
+                utils.logger.warning(f"[WeChatAPI] Traceback: {traceback.format_exc()}")
+                # 获取失败不影响添加账号
+        else:
+            utils.logger.info(f"[WeChatAPI] Skipping total_count fetch - no auth info provided")
+        
+        # 保存到数据库
+        async with get_session() as session:
+            stmt = select(WeChatAccount).where(WeChatAccount.fakeid == request.fakeid)
+            result = await session.execute(stmt)
+            existing_account = result.scalar_one_or_none()
+            
+            ts = int(time.time() * 1000)
+            
+            if existing_account:
+                # 更新
+                existing_account.nickname = request.nickname
+                existing_account.alias = request.alias
+                existing_account.round_head_img = request.round_head_img
+                existing_account.last_modify_ts = ts
+                # 如果获取到了新的 total_count，更新它
+                if total_article_count > 0:
+                    existing_account.total_article_count = total_article_count
+            else:
+                # 新增
+                new_account = WeChatAccount(
+                    fakeid=request.fakeid,
+                    nickname=request.nickname,
+                    alias=request.alias,
+                    round_head_img=request.round_head_img,
+                    service_type=request.service_type,
+                    total_article_count=total_article_count,
+                    add_ts=ts,
+                    last_modify_ts=ts
+                )
+                session.add(new_account)
+            
+            await session.commit()
+            
+        return {
+            "status": "success", 
+            "message": f"已添加公众号: {request.nickname}",
+            "total_article_count": total_article_count
+        }
+
+    except Exception as e:
+        utils.logger.error(f"[WeChatAPI] Add account failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class RefreshTotalCountRequest(BaseModel):
+    """刷新文章总数请求"""
+    fakeid: str
+    cookies: str
+    token: str
+
+
+class BatchRefreshTotalCountRequest(BaseModel):
+    """批量刷新文章总数请求"""
+    fakeids: List[str]  # 公众号 fakeid 列表，为空则刷新所有
+    cookies: str
+    token: str
+
+
+@router.post("/refresh_total_count")
+async def refresh_total_count(request: RefreshTotalCountRequest):
+    """
+    刷新单个公众号的文章总数
+    
+    用于手动更新公众号的 total_article_count 字段
+    """
+    try:
+        from database.db_session import get_session
+        from database.models import WeChatAccount
+        from sqlalchemy import select
+        import time
+        
+        # 获取文章总数
+        total_count = await _fetch_account_total_count(
+            fakeid=request.fakeid,
+            cookies=request.cookies,
+            token=request.token
+        )
+        
+        # 更新数据库
+        async with get_session() as session:
+            stmt = select(WeChatAccount).where(WeChatAccount.fakeid == request.fakeid)
+            result = await session.execute(stmt)
+            account = result.scalar_one_or_none()
+            
+            if not account:
+                raise HTTPException(status_code=404, detail="公众号不存在")
+            
+            old_count = account.total_article_count or 0
+            account.total_article_count = total_count
+            account.last_modify_ts = int(time.time() * 1000)
+            
+            await session.commit()
+            
+        utils.logger.info(f"[WeChatAPI] Refreshed total_count for {request.fakeid}: {old_count} -> {total_count}")
+        
+        return {
+            "status": "success",
+            "fakeid": request.fakeid,
+            "old_count": old_count,
+            "new_count": total_count
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        utils.logger.error(f"[WeChatAPI] Refresh total_count failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/batch_refresh_total_count")
+async def batch_refresh_total_count(request: BatchRefreshTotalCountRequest):
+    """
+    批量刷新公众号的文章总数
+    
+    - 如果 fakeids 为空，则刷新所有已添加的公众号
+    - 为避免频率限制，每个请求之间会间隔 1 秒
+    """
+    try:
+        from database.db_session import get_session
+        from database.models import WeChatAccount
+        from sqlalchemy import select
+        import time
+        
+        # 获取要刷新的公众号列表
+        async with get_session() as session:
+            if request.fakeids:
+                stmt = select(WeChatAccount).where(WeChatAccount.fakeid.in_(request.fakeids))
+            else:
+                stmt = select(WeChatAccount)
+            
+            result = await session.execute(stmt)
+            accounts = result.scalars().all()
+        
+        if not accounts:
+            return {
+                "status": "success",
+                "message": "没有需要刷新的公众号",
+                "results": []
+            }
+        
+        results = []
+        success_count = 0
+        fail_count = 0
+        
+        for i, account in enumerate(accounts):
+            try:
+                # 获取文章总数
+                total_count = await _fetch_account_total_count(
+                    fakeid=account.fakeid,
+                    cookies=request.cookies,
+                    token=request.token
+                )
+                
+                # 更新数据库
+                async with get_session() as session:
+                    stmt = select(WeChatAccount).where(WeChatAccount.fakeid == account.fakeid)
+                    result = await session.execute(stmt)
+                    db_account = result.scalar_one_or_none()
+                    
+                    if db_account:
+                        old_count = db_account.total_article_count or 0
+                        db_account.total_article_count = total_count
+                        db_account.last_modify_ts = int(time.time() * 1000)
+                        await session.commit()
+                        
+                        results.append({
+                            "fakeid": account.fakeid,
+                            "nickname": account.nickname,
+                            "status": "success",
+                            "old_count": old_count,
+                            "new_count": total_count
+                        })
+                        success_count += 1
+                        utils.logger.info(f"[WeChatAPI] Refreshed total_count for {account.nickname}: {old_count} -> {total_count}")
+                
+                # 避免频率限制，间隔 1 秒
+                if i < len(accounts) - 1:
+                    await asyncio.sleep(1)
+                    
+            except Exception as e:
+                results.append({
+                    "fakeid": account.fakeid,
+                    "nickname": account.nickname,
+                    "status": "failed",
+                    "error": str(e)
+                })
+                fail_count += 1
+                utils.logger.warning(f"[WeChatAPI] Failed to refresh total_count for {account.nickname}: {e}")
+        
+        return {
+            "status": "success",
+            "message": f"刷新完成: 成功 {success_count}, 失败 {fail_count}",
+            "success_count": success_count,
+            "fail_count": fail_count,
+            "results": results
+        }
+        
+    except Exception as e:
+        utils.logger.error(f"[WeChatAPI] Batch refresh total_count failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/delete_account")
+async def delete_account(request: DeleteAccountRequest):
+    """删除公众号"""
+    try:
+        from database.db_session import get_session
+        from database.models import WeChatAccount, WeChatArticle
+        from sqlalchemy import delete
+        
+        async with get_session() as session:
+            # 删除账号信息
+            await session.execute(delete(WeChatAccount).where(WeChatAccount.fakeid == request.fakeid))
+            
+            # 如果请求删除数据
+            if request.delete_data:
+                await session.execute(delete(WeChatArticle).where(WeChatArticle.fakeid == request.fakeid))
+            
+            await session.commit()
+            
+        return {"status": "success", "message": "删除成功"}
+    except Exception as e:
+        utils.logger.error(f"[WeChatAPI] Delete account failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -784,6 +1163,9 @@ async def search_account(request: WeChatSearchRequest):
                 data = response.json()
             except Exception:
                  raise HTTPException(status_code=500, detail="Invalid JSON response from WeChat")
+            
+            # Debug: print response data
+            utils.logger.info(f"[WeChatAPI] Search response data: {data}")
             
             # Check for errors
             base_resp = data.get("base_resp", {})
@@ -1388,4 +1770,3 @@ async def refetch_article_content(request: RefetchRequest):
     except Exception as e:
         utils.logger.error(f"[WeChatAPI] Refetch content failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-

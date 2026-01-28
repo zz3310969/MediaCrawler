@@ -194,6 +194,40 @@ class WeChatClient(ProxyRefreshMixin):
         utils.logger.info(f"[WeChatClient.search_account] Searching account: {keyword}")
         return await self.get(uri, params)
 
+    async def get_account_profile(self, fakeid: str) -> Dict:
+        """
+        获取公众号详情（包含文章总数等信息）
+        
+        Args:
+            fakeid: 公众号fakeid
+            
+        Returns:
+            公众号详情数据
+        """
+        if not self.token:
+            raise TokenExpiredError("Token is required for getting account profile")
+            
+        # 注意：这里使用的是 appmsgpublish 接口，虽然是获取文章列表，但返回数据中包含 app_msg_cnt
+        uri = "/cgi-bin/appmsgpublish"
+        params = {
+            "sub": "list",
+            "search_field": "null",
+            "begin": 0,
+            "count": 1,
+            "query": "",
+            "fakeid": fakeid,
+            "type": "101_1",
+            "free_publish_type": 1,
+            "sub_action": "list_ex",
+            "token": self.token,
+            "lang": "zh_CN",
+            "f": "json",
+            "ajax": 1,
+        }
+        
+        utils.logger.info(f"[WeChatClient.get_account_profile] Getting profile for: {fakeid}")
+        return await self.get(uri, params)
+
     async def get_article_list(
         self,
         fakeid: str,
@@ -249,9 +283,12 @@ class WeChatClient(ProxyRefreshMixin):
                         articles.extend(publish_info.get("appmsgex", []))
                 
                 response["articles"] = articles
+                # 提取文章总数
+                response["total_count"] = publish_page.get("total_count", 0)
             except json.JSONDecodeError as e:
                 utils.logger.error(f"[WeChatClient.get_article_list] Failed to parse articles: {e}")
                 response["articles"] = []
+                response["total_count"] = 0
         
         return response
 
@@ -421,16 +458,22 @@ class WeChatClient(ProxyRefreshMixin):
         utils.logger.info(f"[WeChatClient.get_article_html] Fetching HTML for: {article_url}")
         
         try:
-            headers = self.headers.copy()
+            # 使用与 refetch_content API 一致的 headers
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+                "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+            }
             
             # 如果需要凭证，添加特殊的cookie
             if with_credential:
                 credentials = getattr(config, "WECHAT_CREDENTIALS", {})
                 if credentials.get("pass_ticket") and credentials.get("uin"):
                     # 添加认证相关的cookie
-                    headers["Cookie"] = f"{headers.get('Cookie', '')}; pass_ticket={credentials['pass_ticket']}"
+                    headers["Cookie"] = f"pass_ticket={credentials['pass_ticket']}"
             
-            async with httpx.AsyncClient(proxy=self.proxy, timeout=self.timeout) as client:
+            # 使用 follow_redirects=True 跟踪重定向（与 refetch_content API 一致）
+            async with httpx.AsyncClient(proxy=self.proxy, timeout=self.timeout, follow_redirects=True) as client:
                 response = await client.get(article_url, headers=headers)
                 
                 if response.status_code == 200:
@@ -448,10 +491,12 @@ class WeChatClient(ProxyRefreshMixin):
                         utils.logger.warning(f"[WeChatClient.get_article_html] Article under review: {article_url}")
                         return None
                     else:
-                        utils.logger.error(f"[WeChatClient.get_article_html] Invalid HTML content")
+                        utils.logger.error(f"[WeChatClient.get_article_html] Invalid HTML content, url: {article_url}")
+                        # 打印 HTML 前 500 字符用于调试
+                        utils.logger.debug(f"[WeChatClient.get_article_html] HTML preview: {html[:500] if html else 'empty'}")
                         return None
                 else:
-                    utils.logger.error(f"[WeChatClient.get_article_html] HTTP {response.status_code}")
+                    utils.logger.error(f"[WeChatClient.get_article_html] HTTP {response.status_code}, url: {article_url}")
                     return None
                     
         except Exception as e:

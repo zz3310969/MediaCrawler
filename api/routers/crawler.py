@@ -61,3 +61,50 @@ async def get_logs(limit: int = 100):
     """Get recent logs"""
     logs = crawler_manager.logs[-limit:] if limit > 0 else crawler_manager.logs
     return {"logs": [log.model_dump() for log in logs]}
+
+
+@router.post("/reset_browser")
+async def reset_browser():
+    """Reset browser data (clear login state)"""
+    try:
+        import shutil
+        import os
+        import config
+        
+        # Determine user data directory based on platform
+        platforms = ["wechat", "xhs", "dy", "bilibili", "ks", "wb"]
+        
+        cleared_count = 0
+        base_dir = os.path.join(os.getcwd(), "browser_data")
+        
+        if os.path.exists(base_dir):
+            for platform in platforms:
+                # 尝试匹配各种可能的目录名格式
+                # config.USER_DATA_DIR 通常是 "%s_user_data_dir"
+                dir_name = config.USER_DATA_DIR % platform
+                user_data_dir = os.path.join(base_dir, dir_name)
+                
+                if os.path.exists(user_data_dir):
+                    shutil.rmtree(user_data_dir)
+                    cleared_count += 1
+                
+                # 同时也尝试清理 cdp_ 前缀的目录（如果存在）
+                cdp_dir_name = f"cdp_{dir_name}"
+                cdp_user_data_dir = os.path.join(base_dir, cdp_dir_name)
+                if os.path.exists(cdp_user_data_dir):
+                    shutil.rmtree(cdp_user_data_dir)
+                    cleared_count += 1
+        
+        # Clear in-memory state in crawler_manager
+        crawler_manager.new_cookies = None
+        crawler_manager.new_token = None
+        crawler_manager.qrcode_img = None
+        
+        # Log the reset action
+        crawler_manager._logs.append(crawler_manager._create_log_entry("Browser data and login state reset", "info"))
+                
+        return {"status": "ok", "message": f"已清除 {cleared_count} 个平台的浏览器数据"}
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))

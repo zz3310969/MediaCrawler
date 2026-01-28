@@ -22,6 +22,7 @@ from database.models import (
     DouyinAweme, DouyinAwemeComment,
     BilibiliVideo, BilibiliVideoComment,
     KuaishouVideo, KuaishouVideoComment,
+    WeChatArticle,
 )
 from tools import utils
 from tools.time_util import get_current_timestamp
@@ -35,6 +36,7 @@ PLATFORM_MODEL_MAP = {
     'dy': {'note': DouyinAweme, 'note_id_field': 'aweme_id', 'user_id_field': 'user_id', 'time_field': 'create_time', 'title_field': 'title'},
     'bili': {'note': BilibiliVideo, 'note_id_field': 'video_id', 'user_id_field': 'user_id', 'time_field': 'create_time', 'title_field': 'title'},
     'ks': {'note': KuaishouVideo, 'note_id_field': 'video_id', 'user_id_field': 'user_id', 'time_field': 'create_time', 'title_field': 'title'},
+    'wechat': {'note': WeChatArticle, 'note_id_field': 'article_id', 'user_id_field': 'fakeid', 'time_field': 'create_time', 'title_field': 'title'},
 }
 
 
@@ -267,6 +269,7 @@ class CreatorIncrementalHandler:
             # 获取平台对应的模型配置
             model_config = PLATFORM_MODEL_MAP.get(self.platform)
             if not model_config:
+                utils.logger.warning(f"[CreatorIncremental] 平台 {self.platform} 未配置模型映射")
                 return False
             
             model_class = model_config['note']
@@ -274,6 +277,10 @@ class CreatorIncrementalHandler:
             user_id_field = model_config['user_id_field']
             
             async with get_session() as session:
+                if session is None:
+                    utils.logger.warning(f"[CreatorIncremental] 数据库会话为空，无法检查文章: {note_id}")
+                    return False
+                
                 # 动态构建查询
                 note_id_column = getattr(model_class, note_id_field)
                 user_id_column = getattr(model_class, user_id_field)
@@ -283,9 +290,14 @@ class CreatorIncrementalHandler:
                     user_id_column == creator_id
                 )
                 result = await session.execute(stmt)
-                return result.first() is not None
+                exists = result.first() is not None
+                utils.logger.debug(
+                    f"[CreatorIncremental] 检查文章存在: platform={self.platform}, "
+                    f"note_id={note_id}, creator_id={creator_id}, exists={exists}"
+                )
+                return exists
         except Exception as e:
-            utils.logger.debug(f"[CreatorIncremental] 检查笔记存在失败: {e}")
+            utils.logger.warning(f"[CreatorIncremental] 检查笔记存在失败: note_id={note_id}, error={e}")
             return False
     
     async def _check_in_json(self, note_id: str) -> bool:

@@ -82,6 +82,48 @@ class WeChatCrawler(AbstractCrawler):
             ip_proxy_info: IpInfoModel = await self.ip_proxy_pool.get_proxy()
             playwright_proxy_format, httpx_proxy_format = utils.format_proxy_info(ip_proxy_info)
 
+        # 检查登录模式和类型
+        login_type = config.LOGIN_TYPE
+        login_mode = getattr(wechat_config, "LOGIN_MODE", "browser")
+        
+        # 尝试使用账号 Cookie
+        if self._current_account and self._current_account.cookies:
+            login_type = "cookie"
+            utils.logger.info(f"[WeChatCrawler] Using account cookies for login")
+
+        # 判断是否可以使用 API 登录
+        use_api_login = (login_mode == "api" and login_type == "mp_qrcode")
+        
+        # 如果是 API 登录，先执行登录逻辑，不启动浏览器
+        if use_api_login:
+            from .login_api import WeChatAPILogin
+            utils.logger.info("[WeChatCrawler] Using API login mode (mp_qrcode)")
+            
+            api_login = WeChatAPILogin()
+            if await api_login.run():
+                token, cookies = api_login.get_results()
+                
+                # API 登录成功，更新 Cookie 字符串
+                if cookies:
+                    cookie_str = "; ".join([f"{k}={v}" for k, v in cookies.items()])
+                    # 将 API 获取的 Cookie 更新到 config 中，以便后续使用
+                    config.COOKIES = cookie_str
+                    
+                # 设置 Token
+                if token:
+                    # 暂时保存 token，待 client 初始化后设置
+                    pass
+                    
+                # 如果是仅登录模式，直接返回，不启动浏览器
+                login_only = getattr(config, 'LOGIN_ONLY', False)
+                if login_only:
+                    utils.logger.info("[WeChatCrawler] API Login successful (Login Only mode)")
+                    return
+            else:
+                utils.logger.error("[WeChatCrawler] API login failed")
+                return
+
+        # 启动浏览器 (非 API 登录模式，或 API 登录后需要继续爬取)
         async with async_playwright() as playwright:
             # 选择启动模式
             if config.ENABLE_CDP_MODE:
@@ -111,18 +153,34 @@ class WeChatCrawler(AbstractCrawler):
             # 创建客户端
             self.wechat_client = await self.create_wechat_client(httpx_proxy_format)
             
+            # 如果之前 API 登录成功，注入 Cookie 和 Token
+            if use_api_login and 'api_login' in locals():
+                token, cookies = api_login.get_results()
+                if cookies:
+                    playwright_cookies = []
+                    for k, v in cookies.items():
+                        playwright_cookies.append({
+                            'name': k,
+                            'value': v,
+                            'domain': ".weixin.qq.com",
+                            'path': "/"
+                        })
+                    await self.browser_context.add_cookies(playwright_cookies)
+                    await self.wechat_client.update_cookies(browser_context=self.browser_context)
+                
+                if token:
+                    self.wechat_client.set_token(token)
+                    utils.logger.info(f"[WeChatCrawler] Token set from API login: {token}")
+            
             # 首先检查是否已经登录（从当前页面URL或cookies中提取token）
+            # 注意：如果 API 登录成功，这里应该能检测到
             is_logged_in = await self._check_existing_login()
             
-            if not is_logged_in:
+            if not is_logged_in and not use_api_login:
                 cookie_str = self._get_account_cookies() or config.COOKIES
-                login_type = config.LOGIN_TYPE
                 
-                # 如果有账号Cookie，使用cookie登录方式
-                if self._current_account and self._current_account.cookies:
-                    login_type = "cookie"
-                    utils.logger.info(f"[WeChatCrawler] Using account cookies for login")
-                
+                # 浏览器自动化登录模式
+                utils.logger.info(f"[WeChatCrawler] Using Browser login mode ({login_type})")
                 login_obj = WeChatLogin(
                     login_type=login_type,
                     browser_context=self.browser_context,
@@ -202,7 +260,21 @@ class WeChatCrawler(AbstractCrawler):
                     
                     utils.logger.info(f"[WeChatCrawler.search] Processing account: {nickname} (fakeid: {fakeid})")
                     
-                    # 爬取该公众号的文章
+                    # 1. 尝试获取文章总数
+                    try:
+                        profile_res = await self.wechat_client.get_account_profile(fakeid)
+                        app_msg_cnt = profile_res.get("app_msg_cnt")
+                        if app_msg_cnt is not None:
+                            account["total_article_count"] = int(app_msg_cnt)
+                            utils.logger.info(f"[WeChatCrawler.search] Total articles: {app_msg_cnt}")
+                            
+                            # 保存公众号信息（包含总数）
+                            from store import wechat as wechat_store
+                            await wechat_store.store_creator(account)
+                    except Exception as e:
+                        utils.logger.warning(f"[WeChatCrawler.search] Failed to get profile stats: {e}")
+                    
+                    # 2. 爬取该公众号的文章
                     await self.get_account_articles(fakeid, nickname)
                     
                     # 延迟
@@ -213,17 +285,73 @@ class WeChatCrawler(AbstractCrawler):
                 continue
 
     async def get_account_articles(self, fakeid: str, nickname: str = ""):
-        """获取指定公众号的文章"""
-        utils.logger.info(f"[WeChatCrawler.get_account_articles] Getting articles for: {nickname}")
+        """获取指定公众号的文章（支持增量爬取）"""
+        utils.logger.info(f"[WeChatCrawler.get_account_articles] Getting articles for: {nickname} ({fakeid})")
+        
+        # 尝试更新一次总数（针对 creator 模式单独调用的情况）
+        try:
+            profile_res = await self.wechat_client.get_account_profile(fakeid)
+            app_msg_cnt = profile_res.get("app_msg_cnt")
+            if app_msg_cnt is not None:
+                account_info = {
+                    "fakeid": fakeid,
+                    "nickname": nickname,
+                    "total_article_count": int(app_msg_cnt)
+                }
+                from store import wechat as wechat_store
+                await wechat_store.store_creator(account_info)
+                utils.logger.info(f"[WeChatCrawler.get_account_articles] Updated total count: {app_msg_cnt}")
+        except Exception as e:
+            utils.logger.warning(f"[WeChatCrawler.get_account_articles] Failed to update total count: {e}")
+        
+        # 检查是否启用增量爬取
+        # 优先使用全局配置（由命令行参数设置），其次使用微信专用配置
+        enable_incremental = getattr(config, "ENABLE_INCREMENTAL_CRAWL", False) or \
+                            getattr(wechat_config, "ENABLE_WECHAT_INCREMENTAL", False)
+        incremental_handler = None
+        
+        utils.logger.info(
+            f"[WeChatCrawler.get_account_articles] 增量爬取配置: "
+            f"ENABLE_INCREMENTAL_CRAWL={getattr(config, 'ENABLE_INCREMENTAL_CRAWL', False)}, "
+            f"ENABLE_WECHAT_INCREMENTAL={getattr(wechat_config, 'ENABLE_WECHAT_INCREMENTAL', False)}, "
+            f"最终启用={enable_incremental}"
+        )
+        
+        if enable_incremental:
+            try:
+                from crawler.incremental import CreatorIncrementalHandler
+                incremental_handler = CreatorIncrementalHandler(platform="wechat")
+                utils.logger.info(f"[WeChatCrawler.get_account_articles] ✅ 增量爬取已启用")
+            except Exception as e:
+                utils.logger.warning(f"[WeChatCrawler.get_account_articles] ❌ 增量模块加载失败: {e}")
+        else:
+            utils.logger.info(f"[WeChatCrawler.get_account_articles] 📦 全量爬取模式")
         
         try:
             # 获取文章列表
             begin = 0
             count = 10
-            max_articles = config.CRAWLER_MAX_NOTES_COUNT
-            total_fetched = 0
+            # 使用微信专用配置，默认不限制（获取全部文章）
+            max_articles = getattr(wechat_config, "MAX_ARTICLES_PER_ACCOUNT", 0) or float('inf')
+            total_fetched = 0   # 从API获取的文章总数（遍历过的文章）
+            total_inserted = 0  # 新增的文章数（数据库INSERT）
+            total_updated = 0   # 更新的文章数（数据库UPDATE）
+            total_skipped = 0   # 跳过的已存在文章数（增量模式下）
+            total_failed = 0    # 保存失败的文章数
+            # 兼容旧的 total_new 变量（表示成功保存的总数 = inserted + updated）
+            total_new = 0
             
-            while total_fetched < max_articles:
+            # 增量爬取：早停计数器（优先使用微信专用配置）
+            early_stop_count = 0
+            early_stop_threshold = getattr(wechat_config, "WECHAT_EARLY_STOP_THRESHOLD", 0) or \
+                                  getattr(config, "CREATOR_EARLY_STOP_THRESHOLD", 5)
+            
+            utils.logger.info(
+                f"[WeChatCrawler.get_account_articles] 开始爬取: 公众号={nickname}, "
+                f"max_articles={max_articles}, early_stop_threshold={early_stop_threshold}"
+            )
+            
+            while total_new < max_articles:
                 result = await self.wechat_client.get_article_list(
                     fakeid=fakeid,
                     begin=begin,
@@ -239,32 +367,132 @@ class WeChatCrawler(AbstractCrawler):
                     utils.logger.info(f"[WeChatCrawler.get_account_articles] No more articles")
                     break
                 
-                utils.logger.info(f"[WeChatCrawler.get_account_articles] Fetched {len(articles)} articles")
+                utils.logger.info(
+                    f"[WeChatCrawler.get_account_articles] 获取第 {begin // count + 1} 页, "
+                    f"本页 {len(articles)} 篇文章 (累计遍历: {total_fetched})"
+                )
                 
-                # 保存文章
+                # 保存文章（带增量检查）
+                should_stop = False
+                page_inserted = 0
+                page_updated = 0
+                page_skipped = 0
+                page_failed = 0
+                
                 for article in articles:
-                    await self.save_article(article, fakeid, nickname)
-                    total_fetched += 1
+                    article_id = article.get("aid", "")
+                    article_title = article.get("title", "")[:30]
+                    total_fetched += 1  # 遍历计数
                     
-                    if total_fetched >= max_articles:
+                    # 增量爬取：检查文章是否已存在
+                    if incremental_handler:
+                        is_exists = await incremental_handler.should_stop_crawling(article_id, fakeid)
+                        if is_exists:
+                            early_stop_count += 1
+                            total_skipped += 1
+                            page_skipped += 1
+                            utils.logger.debug(
+                                f"[WeChatCrawler] 文章已存在: {article_id} ({article_title}...), "
+                                f"连续计数: {early_stop_count}/{early_stop_threshold}"
+                            )
+                            
+                            # 连续 N 条已存在，触发早停
+                            if early_stop_count >= early_stop_threshold:
+                                utils.logger.info(
+                                    f"[WeChatCrawler] 🛑 触发早停: 连续 {early_stop_threshold} 条文章已存在, "
+                                    f"公众号: {nickname}, 遍历: {total_fetched}, 新增: {total_new}, 跳过: {total_skipped}"
+                                )
+                                should_stop = True
+                                break
+                            continue  # 跳过已存在的文章，不保存
+                        else:
+                            # 发现新文章，重置计数
+                            early_stop_count = 0
+                    
+                    # 保存文章
+                    utils.logger.info(
+                        f"[WeChatCrawler.get_account_articles] 准备保存文章 #{total_fetched}: "
+                        f"id={article_id}, title={article_title}"
+                    )
+                    save_result = await self.save_article(article, fakeid, nickname)
+                    
+                    if save_result == "inserted":
+                        total_inserted += 1
+                        page_inserted += 1
+                        total_new += 1
+                        utils.logger.info(
+                            f"[WeChatCrawler.get_account_articles] ✅ 新增成功 (总新增={total_inserted}): "
+                            f"id={article_id}, title={article_title}"
+                        )
+                    elif save_result == "updated":
+                        total_updated += 1
+                        page_updated += 1
+                        total_new += 1
+                        utils.logger.info(
+                            f"[WeChatCrawler.get_account_articles] ✅ 更新成功 (总更新={total_updated}): "
+                            f"id={article_id}, title={article_title}"
+                        )
+                    else:
+                        total_failed += 1
+                        page_failed += 1
+                        utils.logger.warning(
+                            f"[WeChatCrawler.get_account_articles] ❌ 保存失败: "
+                            f"id={article_id}, title={article_title}, result={save_result}"
+                        )
+                    
+                    if total_new >= max_articles:
+                        utils.logger.info(
+                            f"[WeChatCrawler.get_account_articles] 达到最大文章数限制: {max_articles}"
+                        )
                         break
+                
+                # 本页统计
+                utils.logger.info(
+                    f"[WeChatCrawler.get_account_articles] 第 {begin // count + 1} 页完成: "
+                    f"新增={page_inserted}, 更新={page_updated}, 跳过={page_skipped}, 失败={page_failed} | "
+                    f"累计: 遍历={total_fetched}, 新增={total_inserted}, 更新={total_updated}, 跳过={total_skipped}, 失败={total_failed}"
+                )
+                
+                if should_stop:
+                    break
                 
                 # 下一页
                 begin += count
                 await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
+            
+            # 输出最终统计
+            utils.logger.info(
+                f"[WeChatCrawler.get_account_articles] ✅ 完成: 公众号={nickname}, "
+                f"遍历={total_fetched}, 新增={total_inserted}, 更新={total_updated}, 跳过={total_skipped}, 失败={total_failed}"
+            )
+            
+            # 如果有失败的文章，记录警告
+            if total_failed > 0:
+                utils.logger.warning(
+                    f"[WeChatCrawler.get_account_articles] ⚠️ 有 {total_failed} 篇文章保存失败, "
+                    f"请检查数据库连接和存储配置"
+                )
                 
         except Exception as e:
             utils.logger.error(f"[WeChatCrawler.get_account_articles] Error: {e}")
 
-    async def save_article(self, article: Dict, fakeid: str = "", account_name: str = ""):
-        """保存文章数据"""
+    async def save_article(self, article: Dict, fakeid: str = "", account_name: str = "") -> bool:
+        """
+        保存文章数据
+        
+        Returns:
+            bool: 保存成功返回 True，失败返回 False
+        """
+        article_id = article.get("aid", "")
+        article_title = article.get("title", "")
+        
         try:
             article_link = article.get("link", "")
             
             # 提取文章信息
             article_data = {
-                "article_id": article.get("aid", ""),
-                "title": article.get("title", ""),
+                "article_id": article_id,
+                "title": article_title,
                 "link": article_link,
                 "cover": article.get("cover", ""),
                 "digest": article.get("digest", ""),
@@ -281,7 +509,7 @@ class WeChatCrawler(AbstractCrawler):
                 "comment_count": 0,
             }
             
-            utils.logger.info(f"[WeChatCrawler.save_article] Saving article: {article_data['title']}")
+            utils.logger.info(f"[WeChatCrawler.save_article] 开始保存文章: id={article_id}, title={article_title[:30]}")
             
             # 如果启用了文章内容下载，获取HTML内容
             if wechat_config.ENABLE_GET_ARTICLE_CONTENT and article_link:
@@ -342,7 +570,7 @@ class WeChatCrawler(AbstractCrawler):
                                     f"share={article_data['share_num']}, comment={article_data['comment_count']}"
                                 )
                     else:
-                        utils.logger.warning(f"[WeChatCrawler.save_article] Failed to download HTML content")
+                        utils.logger.warning(f"[WeChatCrawler.save_article] Failed to download HTML content, url: {article_link}")
                     
                     # 添加延迟，避免请求过快
                     if wechat_config.ARTICLE_CONTENT_CRAWL_DELAY > 0:
@@ -353,7 +581,9 @@ class WeChatCrawler(AbstractCrawler):
             
             # 调用存储层保存数据
             from store import wechat as wechat_store
-            await wechat_store.update_wechat_article(article_data)
+            utils.logger.debug(f"[WeChatCrawler.save_article] 调用存储层保存: id={article_id}")
+            store_result = await wechat_store.update_wechat_article(article_data)
+            utils.logger.info(f"[WeChatCrawler.save_article] ✅ 存储层保存完成: id={article_id}, result={store_result}")
             
             # 如果启用了评论爬取，获取评论
             comments = []
@@ -364,8 +594,15 @@ class WeChatCrawler(AbstractCrawler):
             if getattr(config, "ENABLE_EXPORT", False) and article_data.get("content"):
                 await self._export_article(article_data, comments)
             
+            utils.logger.info(f"[WeChatCrawler.save_article] ✅ 文章保存成功: id={article_id}, title={article_title[:30]}")
+            # 返回存储结果: "inserted", "updated", 或 "error"
+            return store_result if store_result else "error"
+            
         except Exception as e:
-            utils.logger.error(f"[WeChatCrawler.save_article] Error saving article: {e}")
+            utils.logger.error(f"[WeChatCrawler.save_article] ❌ 保存文章失败: id={article_id}, title={article_title[:30]}, error={e}")
+            import traceback
+            utils.logger.error(f"[WeChatCrawler.save_article] 堆栈信息: {traceback.format_exc()}")
+            return False
     
     async def _export_article(self, article_data: Dict, comments: Optional[List[Dict]] = None):
         """
@@ -1140,13 +1377,29 @@ class WeChatCrawler(AbstractCrawler):
             utils.logger.warning("[WeChatCrawler.get_creators_articles] No account IDs configured")
             return
         
+        # 从数据库获取公众号名称映射
+        nickname_map = {}
+        try:
+            from database.db_session import get_session
+            from database.models import WeChatAccount
+            from sqlalchemy import select
+            
+            async with get_session() as session:
+                stmt = select(WeChatAccount).where(WeChatAccount.fakeid.in_(account_ids))
+                result = await session.execute(stmt)
+                accounts = result.scalars().all()
+                nickname_map = {acc.fakeid: acc.nickname for acc in accounts}
+        except Exception as e:
+            utils.logger.warning(f"[WeChatCrawler.get_creators_articles] Failed to get nicknames from DB: {e}")
+        
         for fakeid in account_ids:
             fakeid = fakeid.strip()
             if not fakeid:
                 continue
             
-            utils.logger.info(f"[WeChatCrawler.get_creators_articles] Processing fakeid: {fakeid}")
-            await self.get_account_articles(fakeid)
+            nickname = nickname_map.get(fakeid, "")
+            utils.logger.info(f"[WeChatCrawler.get_creators_articles] Processing fakeid: {fakeid}, nickname: {nickname}")
+            await self.get_account_articles(fakeid, nickname)
             await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
     
     async def get_album_articles(self):
@@ -1190,16 +1443,32 @@ class WeChatCrawler(AbstractCrawler):
             utils.logger.warning("[WeChatCrawler.get_album_articles] No album or account IDs configured")
             return
         
+        # 从数据库获取公众号名称映射
+        nickname_map = {}
+        try:
+            from database.db_session import get_session
+            from database.models import WeChatAccount
+            from sqlalchemy import select
+            
+            async with get_session() as session:
+                stmt = select(WeChatAccount).where(WeChatAccount.fakeid.in_(account_ids))
+                result = await session.execute(stmt)
+                accounts = result.scalars().all()
+                nickname_map = {acc.fakeid: acc.nickname for acc in accounts}
+        except Exception as e:
+            utils.logger.warning(f"[WeChatCrawler.get_album_articles] Failed to get nicknames from DB: {e}")
+        
         for fakeid in account_ids:
             fakeid = fakeid.strip()
             if not fakeid:
                 continue
             
-            utils.logger.info(f"[WeChatCrawler.get_album_articles] Processing account: {fakeid}")
+            nickname = nickname_map.get(fakeid, "")
+            utils.logger.info(f"[WeChatCrawler.get_album_articles] Processing account: {fakeid} ({nickname})")
             
             if crawl_all_albums:
                 # 获取该公众号的所有合集
-                await self._crawl_account_albums(fakeid)
+                await self._crawl_account_albums(fakeid, nickname)
             else:
                 utils.logger.warning(
                     f"[WeChatCrawler.get_album_articles] ENABLE_CRAWL_ALL_ALBUMS is False, "
@@ -1208,14 +1477,15 @@ class WeChatCrawler(AbstractCrawler):
             
             await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
     
-    async def _crawl_account_albums(self, fakeid: str):
+    async def _crawl_account_albums(self, fakeid: str, account_name: str = ""):
         """
         爬取指定公众号的所有合集
         
         Args:
             fakeid: 公众号fakeid
+            account_name: 公众号名称（可选）
         """
-        utils.logger.info(f"[WeChatCrawler._crawl_account_albums] Getting albums for: {fakeid}")
+        utils.logger.info(f"[WeChatCrawler._crawl_account_albums] Getting albums for: {fakeid} ({account_name})")
         
         try:
             begin = 0
@@ -1251,7 +1521,7 @@ class WeChatCrawler(AbstractCrawler):
                         f"[WeChatCrawler._crawl_account_albums] Processing album: {album_title} ({album_id})"
                     )
                     
-                    await self._crawl_single_album(fakeid, album_id, album_title)
+                    await self._crawl_single_album(fakeid, album_id, album_title, account_name)
                     await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
                 
                 # 下一页
@@ -1262,7 +1532,7 @@ class WeChatCrawler(AbstractCrawler):
         except Exception as e:
             utils.logger.error(f"[WeChatCrawler._crawl_account_albums] Error: {e}")
     
-    async def _crawl_single_album(self, biz: str, album_id: str, album_title: str = ""):
+    async def _crawl_single_album(self, biz: str, album_id: str, album_title: str = "", account_name: str = ""):
         """
         爬取单个合集的所有文章
         
@@ -1270,6 +1540,7 @@ class WeChatCrawler(AbstractCrawler):
             biz: 公众号__biz参数
             album_id: 合集ID
             album_title: 合集标题（可选，用于日志）
+            account_name: 公众号名称（可选）
         """
         utils.logger.info(
             f"[WeChatCrawler._crawl_single_album] Crawling album: {album_title or album_id}"
@@ -1347,7 +1618,7 @@ class WeChatCrawler(AbstractCrawler):
                     "album_title": album_title,
                 }
                 
-                await self.save_article(article_data, biz)
+                await self.save_article(article_data, biz, account_name)
                 
         except Exception as e:
             utils.logger.error(f"[WeChatCrawler._crawl_single_album] Error: {e}")

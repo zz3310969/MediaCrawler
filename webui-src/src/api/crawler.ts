@@ -147,6 +147,11 @@ export interface WeChatAccountItem {
   fakeid: string
   account_name: string
   article_count: number
+  total_article_count?: number
+  round_head_img?: string
+  alias?: string
+  service_type?: number
+  last_sync_time?: number
 }
 
 // 热门文章
@@ -231,6 +236,24 @@ export const crawlerApi = {
   getWeChatAccounts: () => {
     return client.get<WeChatAccountItem[]>('/api/wechat/accounts')
   },
+
+  // 添加公众号
+  addWeChatAccount: (account: {
+    fakeid: string
+    nickname: string
+    alias?: string
+    round_head_img?: string
+    service_type?: number
+    cookies?: string
+    token?: string
+  }) => {
+    return client.post('/api/wechat/add_account', account)
+  },
+
+  // 删除公众号
+  deleteWeChatAccount: (fakeid: string, deleteData: boolean = false) => {
+    return client.post('/api/wechat/delete_account', { fakeid, delete_data: deleteData })
+  },
   
   // 导出文章内容
   exportWeChatArticles: async (articleIds: number[], format: 'html' | 'markdown' | 'json') => {
@@ -276,5 +299,9 @@ export const crawlerApi = {
   getWeChatTopArticles: (limit = 5) => {
     return client.get<WeChatTopArticle[]>(`/api/wechat/top_articles?limit=${limit}`)
   },
-}
 
+  // 重置浏览器数据 (退出登录)
+  resetBrowser: () => {
+    return client.post<void>('/api/crawler/reset_browser')
+  }
+}

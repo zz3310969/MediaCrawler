@@ -592,5 +592,6 @@ class WeChatAccount(Base):
     alias = Column(String(255), comment='公众号别名')
     round_head_img = Column(Text, comment='公众号头像URL')
     service_type = Column(Integer, default=0, comment='公众号类型')
+    total_article_count = Column(Integer, default=0, comment='文章总数(服务端)')
     add_ts = Column(BigInteger, comment='添加时间戳')
     last_modify_ts = Column(BigInteger, comment='最后修改时间戳')

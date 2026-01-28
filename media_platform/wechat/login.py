@@ -18,12 +18,17 @@
 # 使用本代码即表示您同意遵守上述原则和LICENSE中的所有条款。
 
 import asyncio
+import base64
 import functools
-import sys
+import json
+import random
 import re
-from typing import Optional
+import sys
+import time
+from typing import Dict, Optional
 from urllib.parse import parse_qs, urlparse
 
+import httpx
 from playwright.async_api import BrowserContext, Page
 from tenacity import RetryError, retry, retry_if_result, stop_after_attempt, wait_fixed
 
@@ -35,7 +40,7 @@ from .exception import LoginError
 
 
 class WeChatLogin(AbstractLogin):
-    """微信公众号登录"""
+    """微信公众号登录（浏览器模式）"""
 
     def __init__(
         self,
@@ -231,3 +236,267 @@ class WeChatLogin(AbstractLogin):
         """获取登录后的token"""
         return self.token
 
+
+class WeChatAPILogin:
+    """
+    微信公众号 API 登录（无浏览器模式）
+    
+    完全复刻 wechat-article-exporter 的登录逻辑：
+    1. start_session: 获取 uuid cookie
+    2. get_qrcode: 获取二维码图片
+    3. poll_scan_status: 轮询扫码状态
+    4. login: 获取最终 auth-key cookie 和 token
+    """
+    
+    def __init__(self, proxy: Optional[str] = None):
+        self.base_url = "https://mp.weixin.qq.com"
+        self.headers = {
+            "User-Agent": utils.get_user_agent(),
+            "Referer": "https://mp.weixin.qq.com/",
+            "Origin": "https://mp.weixin.qq.com",
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+        }
+        self.proxy = proxy
+        self.client = httpx.AsyncClient(
+            headers=self.headers,
+            proxy=self.proxy,
+            timeout=30,
+            follow_redirects=False  # 不自动跟随重定向，我们需要处理 302
+        )
+        self.token = None
+        self.cookies = {}
+        
+    async def begin(self):
+        """执行完整登录流程"""
+        try:
+            utils.logger.info("[WeChatAPILogin] Starting API login process...")
+            
+            # 1. 开启会话
+            await self.start_session()
+            
+            # 2. 获取二维码
+            await self.get_qrcode()
+            
+            # 3. 轮询扫码状态
+            await self.poll_scan_status()
+            
+            # 4. 登录完成，输出结果
+            self._print_login_info()
+            
+        except Exception as e:
+            utils.logger.error(f"[WeChatAPILogin] Login failed: {e}")
+            raise LoginError(f"API login failed: {e}")
+        finally:
+            await self.client.aclose()
+            
+    async def start_session(self):
+        """开启登录会话，获取 uuid cookie"""
+        utils.logger.info("[WeChatAPILogin] Starting session...")
+        
+        timestamp = str(int(time.time() * 1000))
+        random_val = str(random.randint(0, 99))
+        
+        # 构造 URL (实际上是一个带参数的 bizlogin 请求)
+        # 注意：这里模拟的是 wechat-article-exporter 中 /api/web/login/session/[sid] 的行为
+        # 实际上直接请求微信接口即可
+        
+        # 这一步是为了初始化 cookie jar，特别是 uuid
+        # 在浏览器中访问首页会设置一些初始 cookie，这里模拟一下
+        await self.client.get(self.base_url)
+        
+        # 开启登录流程
+        # 这一步对应 bizlogin?action=startlogin
+        params = {
+            "action": "startlogin",
+            "userlang": "zh_CN",
+            "lang": "zh_CN",
+            "token": "",
+            "f": "json",
+            "ajax": "1"
+        }
+        
+        # POST 请求体
+        data = {
+            "userlang": "zh_CN",
+            "redirect_url": "",
+            "login_type": "3",  # 扫码登录
+            "sessionid": f"{timestamp}{random_val}",
+            "token": "",
+            "lang": "zh_CN",
+            "f": "json",
+            "ajax": "1"
+        }
+        
+        url = f"{self.base_url}/cgi-bin/bizlogin"
+        resp = await self.client.post(url, params=params, data=data)
+        
+        if resp.status_code != 200:
+            raise LoginError(f"Start session failed: HTTP {resp.status_code}")
+            
+        json_data = resp.json()
+        if json_data.get("base_resp", {}).get("ret") != 0:
+             raise LoginError(f"Start session failed: {json_data}")
+             
+        # 检查是否获取到了 uuid cookie
+        # httpx 会自动管理 cookie，我们只需确认 client.cookies 中有 uuid
+        uuid = self.client.cookies.get("uuid")
+        if not uuid:
+            # 有时 uuid 可能在第一次访问首页时就设置了
+            utils.logger.warning("[WeChatAPILogin] UUID cookie not found in response, checking jar...")
+        else:
+            utils.logger.info(f"[WeChatAPILogin] Session started, uuid: {uuid}")
+
+    async def get_qrcode(self):
+        """获取登录二维码"""
+        utils.logger.info("[WeChatAPILogin] Fetching QR code...")
+        
+        timestamp = str(int(time.time() * 1000))
+        params = {
+            "action": "getqrcode",
+            "random": timestamp
+        }
+        
+        url = f"{self.base_url}/cgi-bin/scanloginqrcode"
+        resp = await self.client.get(url, params=params)
+        
+        if resp.status_code != 200:
+            raise LoginError(f"Get QR code failed: HTTP {resp.status_code}")
+            
+        # 获取图片二进制数据
+        img_data = resp.content
+        if not img_data:
+            raise LoginError("Empty QR code image")
+            
+        # 转为 base64
+        base64_img = base64.b64encode(img_data).decode('utf-8')
+        
+        # 显示二维码
+        partial_show_qrcode = functools.partial(utils.show_qrcode, base64_img)
+        asyncio.get_running_loop().run_in_executor(executor=None, func=partial_show_qrcode)
+        
+        # 打印供 WebUI 捕获
+        print(f"[QRCODE_UPDATE] {base64_img}")
+        
+        utils.logger.info("[WeChatAPILogin] QR code displayed, please scan with WeChat")
+
+    async def poll_scan_status(self):
+        """轮询扫码状态"""
+        utils.logger.info("[WeChatAPILogin] Waiting for scan...")
+        
+        while True:
+            params = {
+                "action": "ask",
+                "token": "",
+                "lang": "zh_CN",
+                "f": "json",
+                "ajax": "1",
+                # "random": str(int(time.time() * 1000))
+            }
+            
+            url = f"{self.base_url}/cgi-bin/scanloginqrcode"
+            
+            try:
+                resp = await self.client.get(url, params=params)
+                if resp.status_code != 200:
+                    utils.logger.warning(f"[WeChatAPILogin] Poll failed: HTTP {resp.status_code}")
+                    await asyncio.sleep(2)
+                    continue
+                    
+                data = resp.json()
+                status = data.get("status")
+                
+                # status:
+                # 0: 等待扫码
+                # 1: 登录成功
+                # 2: 二维码过期
+                # 3: 二维码过期
+                # 4: 扫码成功，等待确认
+                # 6: 扫码成功，等待确认
+                
+                if status == 1:
+                    utils.logger.info("[WeChatAPILogin] Scan confirmed, logging in...")
+                    await self.finalize_login()
+                    break
+                    
+                elif status == 4 or status == 6:
+                    utils.logger.info("[WeChatAPILogin] Scanned, waiting for confirmation on phone...")
+                    
+                elif status == 2 or status == 3:
+                    utils.logger.warning("[WeChatAPILogin] QR code expired, refreshing...")
+                    await self.get_qrcode()
+                    
+                else:
+                    # utils.logger.debug(f"[WeChatAPILogin] Waiting... status: {status}")
+                    pass
+                
+                # 间隔
+                await asyncio.sleep(2)
+                
+            except Exception as e:
+                utils.logger.error(f"[WeChatAPILogin] Poll error: {e}")
+                await asyncio.sleep(2)
+
+    async def finalize_login(self):
+        """完成登录，获取 auth-key 和 token"""
+        utils.logger.info("[WeChatAPILogin] Finalizing login...")
+        
+        params = {
+            "action": "login",
+        }
+        
+        data = {
+            "userlang": "zh_CN",
+            "redirect_url": "",
+            "cookie_forbidden": "0",
+            "cookie_cleaned": "0",
+            "plugin_used": "0",
+            "login_type": "3",
+            "token": "",
+            "lang": "zh_CN",
+            "f": "json",
+            "ajax": "1"
+        }
+        
+        url = f"{self.base_url}/cgi-bin/bizlogin"
+        
+        # 这个请求会返回 200，内容包含 redirect_url
+        # 关键是这个请求的响应头中会包含 auth-key 等重要 cookie
+        resp = await self.client.post(url, params=params, data=data)
+        
+        if resp.status_code != 200:
+             raise LoginError(f"Login finalize failed: HTTP {resp.status_code}")
+             
+        json_data = resp.json()
+        redirect_url = json_data.get("redirect_url")
+        
+        if not redirect_url:
+            raise LoginError(f"Login failed, no redirect_url: {json_data}")
+            
+        # 提取 token
+        # redirect_url 示例: /cgi-bin/home?t=home/index&lang=zh_CN&token=123456789
+        parsed = urlparse(f"https://mp.weixin.qq.com{redirect_url}")
+        query = parse_qs(parsed.query)
+        self.token = query.get("token", [""])[0]
+        
+        if not self.token:
+            raise LoginError("Login failed, token not found in redirect_url")
+            
+        utils.logger.info(f"[WeChatAPILogin] Login successful! Token: {self.token}")
+        
+        # 收集所有 cookie
+        self.cookies = dict(self.client.cookies)
+        
+    def _print_login_info(self):
+        """输出登录信息供上层使用"""
+        # 格式化 cookie 字符串
+        cookie_str = "; ".join([f"{k}={v}" for k, v in self.cookies.items()])
+        
+        # 打印特殊标记供 crawler_manager 捕获
+        print(f"[COOKIE_UPDATE] {cookie_str}")
+        print(f"[TOKEN_UPDATE] {self.token}")
+        
+    def get_cookies_dict(self) -> Dict[str, str]:
+        return self.cookies
+        
+    def get_token(self) -> Optional[str]:
+        return self.token

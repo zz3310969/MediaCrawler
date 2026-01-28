@@ -96,29 +96,59 @@ class WeChatDbStoreImplement(AbstractStore):
         storage = self._get_content_storage()
         return await storage.save_content(article_id, content, fakeid)
     
-    async def store_content(self, content_item: Dict):
-        """存储文章内容到数据库"""
+    async def store_content(self, content_item: Dict) -> str:
+        """
+        存储文章内容到数据库
+        
+        Returns:
+            str: "inserted" 表示新增, "updated" 表示更新, "error" 表示失败
+        """
         from database.db_session import get_session
         from database.models import WeChatArticle
-        from sqlalchemy import select, update
+        from sqlalchemy import select, update, and_
         from tools import utils
         
         article_id = content_item.get("article_id")
+        fakeid = content_item.get("fakeid", "")
+        title = content_item.get("title", "")[:1000]
+        
         if not article_id:
-            return
+            utils.logger.warning(f"[WeChatDbStoreImplement.store_content] ⚠️ 文章ID为空，跳过保存")
+            return "error"
+        
+        if not fakeid:
+            utils.logger.warning(f"[WeChatDbStoreImplement.store_content] ⚠️ fakeid为空，跳过保存: id={article_id}")
+            return "error"
+        
+        utils.logger.info(f"[WeChatDbStoreImplement.store_content] 开始存储: id={article_id}, fakeid={fakeid}, title={title}")
         
         async with get_session() as session:
-            # 检查文章是否存在
-            stmt = select(WeChatArticle).where(WeChatArticle.article_id == article_id)
+            if session is None:
+                utils.logger.error(f"[WeChatDbStoreImplement.store_content] ❌ 数据库会话为空，无法保存文章: id={article_id}")
+                return "error"
+            
+            # 检查文章是否存在（使用 article_id + fakeid 组合条件）
+            stmt = select(WeChatArticle).where(
+                and_(
+                    WeChatArticle.article_id == article_id,
+                    WeChatArticle.fakeid == fakeid
+                )
+            )
             result = await session.execute(stmt)
             existing_article = result.scalar_one_or_none()
             
             if existing_article:
                 # 更新现有文章
+                utils.logger.info(f"[WeChatDbStoreImplement.store_content] 文章已存在，执行更新: id={article_id}, fakeid={fakeid}")
                 await self._update_article(session, content_item)
+                utils.logger.info(f"[WeChatDbStoreImplement.store_content] ✅ 更新完成: id={article_id}, fakeid={fakeid}")
+                return "updated"
             else:
                 # 添加新文章
+                utils.logger.info(f"[WeChatDbStoreImplement.store_content] 文章不存在，执行新增: id={article_id}, fakeid={fakeid}")
                 await self._add_article(session, content_item)
+                utils.logger.info(f"[WeChatDbStoreImplement.store_content] ✅ 新增完成: id={article_id}, fakeid={fakeid}")
+                return "inserted"
     
     async def _add_article(self, session, content_item: Dict):
         """添加新文章"""
@@ -176,7 +206,7 @@ class WeChatDbStoreImplement(AbstractStore):
     async def _update_article(self, session, content_item: Dict):
         """更新现有文章"""
         from database.models import WeChatArticle
-        from sqlalchemy import update
+        from sqlalchemy import update, and_
         from tools import utils
         
         article_id = content_item.get("article_id")
@@ -207,9 +237,15 @@ class WeChatDbStoreImplement(AbstractStore):
             else:
                 update_data["content"] = content
         
-        stmt = update(WeChatArticle).where(WeChatArticle.article_id == article_id).values(**update_data)
+        # 使用 article_id + fakeid 组合条件更新
+        stmt = update(WeChatArticle).where(
+            and_(
+                WeChatArticle.article_id == article_id,
+                WeChatArticle.fakeid == fakeid
+            )
+        ).values(**update_data)
         await session.execute(stmt)
-        utils.logger.info(f"[WeChatDbStoreImplement._update_article] Updated article: {article_id}")
+        utils.logger.info(f"[WeChatDbStoreImplement._update_article] Updated article: id={article_id}, fakeid={fakeid}")
 
     async def store_comment(self, comment_item: Dict):
         """存储评论到数据库"""
@@ -355,6 +391,11 @@ class WeChatDbStoreImplement(AbstractStore):
                     "round_head_img": creator.get("round_head_img", ""),
                     "service_type": creator.get("service_type", 0),
                 }
+                
+                # 如果有文章总数，也更新 (可能由爬虫提供)
+                if "total_article_count" in creator:
+                    update_data["total_article_count"] = creator["total_article_count"]
+                
                 stmt = update(WeChatAccount).where(WeChatAccount.fakeid == fakeid).values(**update_data)
                 await session.execute(stmt)
                 utils.logger.info(f"[WeChatDbStoreImplement.store_creator] Updated account: {fakeid}")
@@ -369,6 +410,7 @@ class WeChatDbStoreImplement(AbstractStore):
                     alias=creator.get("alias", ""),
                     round_head_img=creator.get("round_head_img", ""),
                     service_type=creator.get("service_type", 0),
+                    total_article_count=creator.get("total_article_count", 0),
                     add_ts=add_ts,
                     last_modify_ts=last_modify_ts,
                 )

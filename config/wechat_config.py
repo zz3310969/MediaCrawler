@@ -7,16 +7,6 @@
 # Licensed under NON-COMMERCIAL LEARNING LICENSE 1.1
 #
 
-# 声明：本代码仅供学习和研究目的使用。使用者应遵守以下原则：
-# 1. 不得用于任何商业用途。
-# 2. 使用时应遵守目标平台的使用条款和robots.txt规则。
-# 3. 不得进行大规模爬取或对平台造成运营干扰。
-# 4. 应合理控制请求频率，避免给目标平台带来不必要的负担。
-# 5. 不得用于任何非法或不当的用途。
-#
-# 详细许可条款请参阅项目根目录下的LICENSE文件。
-# 使用本代码即表示您同意遵守上述原则和LICENSE中的所有条款。
-
 # 微信公众号爬虫配置
 
 # ==================== 爬取类型配置 ====================
@@ -83,11 +73,21 @@ WECHAT_CREDENTIALS = {
 }
 
 # ==================== 爬取控制配置 ====================
-# 每个公众号最大爬取文章数
-MAX_ARTICLES_PER_ACCOUNT = 100
+# 每个公众号最大爬取文章数（0 表示不限制，获取全部文章）
+MAX_ARTICLES_PER_ACCOUNT = 0
 
 # 文章列表分页大小
 ARTICLE_LIST_PAGE_SIZE = 10
+
+# ==================== 增量爬取配置 ====================
+# 是否启用增量爬取（断点续爬）
+# 启用后，会自动跳过已爬取的文章，只获取新文章
+# 注意：此配置会被 API 请求中的 enable_incremental 参数覆盖
+ENABLE_WECHAT_INCREMENTAL = False  # 默认关闭，通过 API 参数控制
+
+# 早停阈值：连续 N 条文章已存在时停止爬取
+# 建议值：3-5，太小可能误判（中间有删除的文章），太大影响效率
+WECHAT_EARLY_STOP_THRESHOLD = 5
 
 # 是否爬取文章全文内容（HTML）
 ENABLE_GET_ARTICLE_CONTENT = False
@@ -128,6 +128,11 @@ EXPORT_HTML_INCLUDE_COMMENTS = True
 EXPORT_INCLUDE_IMAGES = True
 
 # ==================== 登录配置 ====================
+# 登录模式
+# browser: 浏览器自动化登录（依赖 Playwright，较重，可能不稳定）
+# api: 纯 API 模拟登录（推荐，轻量，稳定，无需浏览器界面）
+LOGIN_MODE = "api"
+
 # 登录类型
 # mp_qrcode: 公众号后台扫码登录（推荐，功能最全）
 # qrcode: 微信APP扫码登录（功能受限）
@@ -137,4 +142,3 @@ LOGIN_TYPE = "mp_qrcode"
 # Cookie字符串（用于 cookie 登录）
 # 格式：key1=value1; key2=value2; ...
 COOKIES = ""
-

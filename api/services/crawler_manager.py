@@ -98,8 +98,10 @@ class CrawlerManager:
 
     async def start(self, config: CrawlerStartRequest) -> bool:
         """Start crawler process"""
+        print(f"[CrawlerManager] Start request received for platform: {config.platform.value}")
         async with self._lock:
             if self.process and self.process.poll() is None:
+                print("[CrawlerManager] Process already running")
                 return False
 
             # Clear old logs
@@ -121,6 +123,7 @@ class CrawlerManager:
 
             # Build command line arguments
             cmd = self._build_command(config)
+            print(f"[CrawlerManager] Command: {' '.join(cmd)}")
 
             # Log start information
             entry = self._create_log_entry(f"Starting crawler: {' '.join(cmd)}", "info")
@@ -138,6 +141,7 @@ class CrawlerManager:
                     cwd=str(self._project_root),
                     env={**os.environ, "PYTHONUNBUFFERED": "1"}
                 )
+                print(f"[CrawlerManager] Process started, PID: {self.process.pid}")
 
                 self.status = "running"
                 self.started_at = datetime.now()
@@ -154,6 +158,7 @@ class CrawlerManager:
 
                 return True
             except Exception as e:
+                print(f"[CrawlerManager] Start failed: {e}")
                 self.status = "error"
                 entry = self._create_log_entry(f"Failed to start crawler: {str(e)}", "error")
                 await self._push_log(entry)
@@ -278,6 +283,7 @@ class CrawlerManager:
     async def _read_output(self):
         """Asynchronously read process output"""
         loop = asyncio.get_event_loop()
+        print("[CrawlerManager] Starting output reader loop")
 
         try:
             while self.process and self.process.poll() is None:
@@ -288,20 +294,27 @@ class CrawlerManager:
                 if line:
                     line = line.strip()
                     if line:
+                        print(f"[CrawlerManager] Output: {line[:100]}...")  # Debug print
                         # Check for cookie update
                         if line.startswith("[COOKIE_UPDATE]"):
                             self.new_cookies = line.replace("[COOKIE_UPDATE]", "").strip()
-                            # Create a success log for it
+                            # Push raw message for frontend to parse
+                            await self._push_log(self._create_log_entry(line, "info"))
+                            # Create a success log for display
                             entry = self._create_log_entry("Cookie retrieved successfully", "success")
                             await self._push_log(entry)
                         # Check for token update
                         elif line.startswith("[TOKEN_UPDATE]"):
                             self.new_token = line.replace("[TOKEN_UPDATE]", "").strip()
+                            # Push raw message for frontend to parse
+                            await self._push_log(self._create_log_entry(line, "info"))
                             entry = self._create_log_entry("Token retrieved successfully", "success")
                             await self._push_log(entry)
                         # Check for QR code update
                         elif line.startswith("[QRCODE_UPDATE]"):
                             self.qrcode_img = line.replace("[QRCODE_UPDATE]", "").strip()
+                            # Push raw message for frontend to parse
+                            await self._push_log(self._create_log_entry(line, "info"))
                             entry = self._create_log_entry("QR Code retrieved successfully", "success")
                             await self._push_log(entry)
                         else:

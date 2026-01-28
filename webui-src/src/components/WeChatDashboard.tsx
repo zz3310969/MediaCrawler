@@ -1,12 +1,14 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { 
   Search, User, FileText, BookOpen, 
   Play, Square, RefreshCw, Eye,
-  LayoutGrid, List, PlusCircle, CheckCircle, BarChart2
+  LayoutGrid, List, PlusCircle, CheckCircle, BarChart2,
+  LogOut // Import LogOut
 } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { crawlerApi } from '@/api/crawler'
 import { useCrawlerConfig } from '@/hooks/useCrawlerConfig'
+import { useWebSocket } from '@/hooks/useWebSocket'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -28,25 +30,8 @@ import { LoginConfig } from './LoginConfig'
 import { TerminalLog } from './TerminalLog'
 import { WeChatDataList } from './WeChatDataList'
 import { WeChatAnalysis } from './WeChatAnalysis'
+import { WeChatAccountManager } from './WeChatAccountManager'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-
-// 模拟数据类型
-// interface Article {
-//   id: string
-//   title: string
-//   account: string
-//   readCount: number
-//   likeCount: number
-//   commentCount: number
-//   pubDate: string
-//   url: string
-// }
-
-// 模拟数据
-// const MOCK_DATA: Article[] = [
-//   { id: '1', title: '2025年人工智能发展趋势报告', account: 'AI前线', readCount: 100000, likeCount: 2345, commentCount: 120, pubDate: '2025-01-27', url: '#' },
-//   { id: '2', title: 'Python 3.13 新特性解析', account: 'Python开发者', readCount: 45000, likeCount: 890, commentCount: 45, pubDate: '2025-01-26', url: '#' },
-// ]
 
 export function WeChatDashboard() {
   const [activeTab, setActiveTab] = useState('data')
@@ -55,18 +40,60 @@ export function WeChatDashboard() {
   const { config, updateConfig } = useCrawlerConfig()
   const queryClient = useQueryClient()
   const [loginDialogOpen, setLoginDialogOpen] = useState(false)
+  const [qrcode, setQrcode] = useState<string>('')
   
-  // 查询爬虫状态，用于监听登录完成
+  // WebSocket 监听
+  useWebSocket({
+    url: '/api/ws/logs',
+    onMessage: (data) => {
+      if (data && data.message) {
+        // 监听二维码更新
+        if (data.message.includes('[QRCODE_UPDATE]')) {
+          // 提取 Base64 字符串
+          const match = data.message.match(/\[QRCODE_UPDATE\]\s*(.+)/)
+          if (match && match[1]) {
+            const code = match[1].replace(/^['"]|['"]$/g, '').trim()
+            setQrcode(code)
+          }
+        }
+        // 监听 Cookie 更新
+        if (data.message.includes('[COOKIE_UPDATE]')) {
+           const match = data.message.match(/\[COOKIE_UPDATE\]\s*(.+)/)
+           if (match && match[1]) {
+             const newCookies = match[1].trim()
+             if (newCookies !== config.cookies) {
+                toast.success('登录成功！Cookie 已自动保存')
+                updateConfig({ cookies: newCookies })
+                setQrcode('')
+             }
+           }
+        }
+        // 监听 Token 更新
+        if (data.message.includes('[TOKEN_UPDATE]')) {
+           const match = data.message.match(/\[TOKEN_UPDATE\]\s*(.+)/)
+           if (match && match[1]) {
+             const newToken = match[1].trim()
+             if (newToken !== config.wechat_token) {
+                toast.success('Token 已自动保存')
+                updateConfig({ wechat_token: newToken })
+             }
+           }
+        }
+      }
+    }
+  })
+  
+  // 查询爬虫状态
   const { data: statusResponse } = useQuery({
     queryKey: ['crawler-status'],
     queryFn: crawlerApi.getStatus,
-    refetchInterval: isRunning ? 1000 : 5000, // 运行时更频繁轮询
+    refetchInterval: isRunning ? 1000 : 5000,
   })
   
   const status = statusResponse?.data
   
-  // 监听登录状态变化，自动更新 Cookie 和 Token
-  React.useEffect(() => {
+  // 监听登录状态变化
+  useEffect(() => {
     if (status?.new_cookies && status.new_cookies !== config.cookies) {
       toast.success('登录成功！Cookie 已自动保存')
       updateConfig({ cookies: status.new_cookies })
@@ -75,10 +102,10 @@ export function WeChatDashboard() {
       toast.success('Token 已自动保存')
       updateConfig({ wechat_token: status.new_token })
     }
-    // 如果状态变为 idle 且之前是 running，说明登录流程结束
     if (status?.status === 'idle' && isRunning) {
       setIsRunning(false)
-      setLoginDialogOpen(false) // 自动关闭登录对话框
+      setLoginDialogOpen(false)
+      setQrcode('')
     }
   }, [status?.new_cookies, status?.new_token, status?.status, config.cookies, config.wechat_token, isRunning, updateConfig])
   
@@ -88,7 +115,11 @@ export function WeChatDashboard() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['crawler-status'] })
       setIsRunning(true)
-      toast.success('登录浏览器已启动，请在弹出的窗口中扫码')
+      if (config.login_type === 'mp_qrcode') {
+        toast.info('正在获取登录二维码，请稍候...')
+      } else {
+        toast.success('登录浏览器已启动')
+      }
     },
     onError: (error: Error) => {
       toast.error(`启动失败: ${error.message}`)
@@ -121,19 +152,29 @@ export function WeChatDashboard() {
     },
   })
 
-  // 处理开始/停止采集
+  // 退出登录 Mutation
+  const logoutMutation = useMutation({
+    mutationFn: crawlerApi.resetBrowser,
+    onSuccess: () => {
+      toast.success('已退出登录并清除本地缓存')
+      updateConfig({ cookies: '', wechat_token: '' })
+      setLoginDialogOpen(false)
+      setQrcode('')
+    },
+    onError: (error: Error) => {
+      toast.error(`退出失败: ${error.message}`)
+    }
+  })
+
   const handleStartStopCrawl = () => {
     if (isRunning) {
-      // 停止采集
       stopMutation.mutate()
     } else {
-      // 检查是否已登录
       if (!config.cookies || !config.wechat_token) {
         toast.error('请先登录微信公众号平台')
         return
       }
       
-      // 根据当前模式构建配置
       const crawlerType = mode === 'search' ? 'search' : 
                           mode === 'account' ? 'creator' :
                           mode === 'article' ? 'detail' : 'album'
@@ -141,36 +182,33 @@ export function WeChatDashboard() {
       const crawlConfig = {
         ...config,
         platform: 'wechat' as const,
-        login_type: 'cookie' as const, // 使用已保存的 Cookie 登录
+        login_type: 'cookie' as const,
         crawler_type: crawlerType as 'search' | 'detail' | 'creator' | 'album',
-        headless: true, // 采集时可以使用无头模式
-        login_only: false, // 需要进行数据采集
+        headless: true,
+        login_only: false,
       }
       
       startCrawlMutation.mutate(crawlConfig)
     }
   }
 
-  // 启动登录流程
   const handleStartLogin = () => {
-    // 强制使用非无头模式启动，确保浏览器窗口能弹出来
+    setQrcode('')
     const loginConfig = {
       ...config,
       platform: 'wechat' as const,
       login_type: 'mp_qrcode' as const,
-      crawler_type: 'search' as const, // 登录时默认用 search 模式占位
-      headless: false, // 关键：强制有头模式
-      login_only: true, // 关键：只登录获取 Cookie/Token，不进行数据爬取
+      crawler_type: 'search' as const,
+      headless: false, 
+      login_only: true,
     }
     startMutation.mutate(loginConfig)
   }
   
-  // 搜索相关状态
   const [searchKeyword, setSearchKeyword] = useState('')
   const [searchResults, setSearchResults] = useState<any[]>([])
   const [isSearching, setIsSearching] = useState(false)
 
-  // 处理搜索
   const handleSearch = async () => {
     if (!searchKeyword.trim()) return
     if (!config.cookies || !config.wechat_token) {
@@ -186,8 +224,6 @@ export function WeChatDashboard() {
         config.wechat_token
       )
       
-      // 解析搜索结果
-      // 微信返回的结构通常在 list 字段中
       if (res?.data?.list) {
          setSearchResults(res.data.list)
       } else {
@@ -202,9 +238,7 @@ export function WeChatDashboard() {
     }
   }
 
-  // 添加公众号到配置
   const handleAddAccount = (account: any) => {
-    // fakeid 是公众号的唯一标识 (base64编码)
     const fakeid = account.fakeid
     const nickname = account.nickname
     
@@ -220,13 +254,32 @@ export function WeChatDashboard() {
     }
   }
 
+  // 判断是否已登录
+  const isLoggedIn = !!(config.cookies && config.wechat_token);
+
+  // 自动开始登录流程
+  useEffect(() => {
+    // 条件：弹窗打开 + 未登录 + 未运行 + 扫码模式 + 没二维码 + 没报错
+    if (
+      loginDialogOpen && 
+      !isLoggedIn && 
+      !isRunning && 
+      config.login_type === 'mp_qrcode' && 
+      !qrcode &&
+      !startMutation.isPending
+    ) {
+      console.log('Auto starting login...');
+      // 使用 setTimeout 避免在渲染周期中直接触发状态更新
+      const timer = setTimeout(() => {
+        handleStartLogin();
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+  }, [loginDialogOpen, isLoggedIn, isRunning, config.login_type, qrcode, startMutation.isPending]);
+
   return (
     <div className="flex h-[calc(100vh-60px)] gap-4 p-4 bg-slate-50/50 dark:bg-slate-950/50">
-      
-      {/* 左侧控制栏 Sidebar */}
       <div className="w-[360px] flex-shrink-0 flex flex-col gap-4">
-        
-        {/* 状态与控制卡片 */}
         <Card className="flex-1 flex flex-col shadow-md border-slate-200 dark:border-slate-800">
           <CardHeader className="pb-2 bg-slate-50 dark:bg-slate-900/50 rounded-t-lg border-b">
             <div className="flex items-center justify-between">
@@ -236,51 +289,105 @@ export function WeChatDashboard() {
                   {isRunning ? '服务运行中' : '服务空闲'}
                 </span>
               </div>
-              {config.cookies && config.wechat_token ? (
-                  <Badge variant="outline" className="text-xs bg-white dark:bg-slate-800 text-green-600 border-green-200">
-                     <CheckCircle className="h-3 w-3 mr-1" /> 已登录
-                  </Badge>
-              ) : (
-                  <Dialog open={loginDialogOpen} onOpenChange={setLoginDialogOpen}>
-                    <DialogTrigger asChild>
-                      <Badge variant="outline" className="text-xs bg-white dark:bg-slate-800 text-slate-500 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-900">
-                         未登录 (点击登录)
-                      </Badge>
-                    </DialogTrigger>
+              {/* 登录状态 Badge */}
+              <Dialog open={loginDialogOpen} onOpenChange={setLoginDialogOpen}>
+                <DialogTrigger asChild>
+                  {isLoggedIn ? (
+                    <Badge variant="outline" className="text-xs bg-white dark:bg-slate-800 text-green-600 border-green-200 cursor-pointer hover:bg-green-50 dark:hover:bg-green-900/20 transition-colors">
+                        <CheckCircle className="h-3 w-3 mr-1" /> 已登录
+                    </Badge>
+                  ) : (
+                    <Badge variant="outline" className="text-xs bg-white dark:bg-slate-800 text-slate-500 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-900 transition-colors">
+                        未登录 (点击登录)
+                    </Badge>
+                  )}
+                </DialogTrigger>
                     <DialogContent className="max-w-[400px]">
                       <DialogHeader>
                         <DialogTitle>登录微信公众平台</DialogTitle>
                       </DialogHeader>
                       <div className="space-y-4">
-                        <div className="h-[300px]">
-                          <LoginConfig
-                            platform="wechat"
-                            loginType={config.login_type}
-                            cookies={config.cookies}
-                            disabled={isRunning}
-                            onLoginTypeChange={(value) => updateConfig({ login_type: value })}
-                            onCookiesChange={(value) => updateConfig({ cookies: value })}
-                          />
-                        </div>
-                        
-                        {/* 只有在扫码模式下才显示启动按钮 */}
-                        {config.login_type === 'mp_qrcode' && (
-                          <Button 
-                            className="w-full bg-green-600 hover:bg-green-700 text-white"
-                            onClick={handleStartLogin}
-                            disabled={isRunning || startMutation.isPending}
-                          >
-                            {isRunning ? '正在运行...' : (
-                              <>
-                                <Play className="mr-2 h-4 w-4" /> 启动登录浏览器
-                              </>
-                            )}
-                          </Button>
+                        {/* 已登录状态显示 */}
+                        {isLoggedIn && config.login_type !== 'cookie' ? (
+                            <div className="flex flex-col items-center justify-center py-8 space-y-4">
+                                <div className="p-4 bg-green-50 dark:bg-green-900/20 rounded-full">
+                                    <CheckCircle className="w-12 h-12 text-green-500" />
+                                </div>
+                                <div className="text-center">
+                                    <p className="text-lg font-medium text-green-600 dark:text-green-400">当前已登录</p>
+                                    <p className="text-xs text-muted-foreground mt-1">您可以开始采集数据了</p>
+                                </div>
+                                <Button 
+                                    variant="destructive" 
+                                    className="mt-4 w-full"
+                                    onClick={() => {
+                                        if (window.confirm('确定要退出登录并清除本地缓存吗？')) {
+                                            logoutMutation.mutate()
+                                        }
+                                    }}
+                                >
+                                    <LogOut className="mr-2 h-4 w-4" /> 退出登录
+                                </Button>
+                            </div>
+                        ) : (
+                            // 未登录或 Cookie 模式显示配置
+                            <div className="max-h-[70vh] overflow-y-auto px-1">
+                                <div className="mb-4">
+                                    <LoginConfig
+                                        platform="wechat"
+                                        loginType={config.login_type}
+                                        cookies={config.cookies}
+                                        disabled={isRunning}
+                                        onLoginTypeChange={(value) => updateConfig({ login_type: value })}
+                                        onCookiesChange={(value) => updateConfig({ cookies: value })}
+                                    />
+                                </div>
+                                
+                                {/* 扫码模式下的额外 UI */}
+                                {config.login_type === 'mp_qrcode' && (
+                                    <div className="flex flex-col items-center justify-center space-y-4 pt-2 border-t">
+                                        {qrcode ? (
+                                            <div className="flex flex-col items-center space-y-2 animate-in fade-in zoom-in duration-300 w-full">
+                                                <div className="p-2 bg-white rounded-lg border shadow-sm relative">
+                                                    <img src={qrcode} alt="登录二维码" className="w-48 h-48 object-contain" />
+                                                </div>
+                                                <p className="text-sm font-medium text-green-600 animate-pulse">
+                                                    请使用微信扫码登录
+                                                </p>
+                                                <p className="text-xs text-muted-foreground text-center max-w-[240px]">
+                                                    扫码后请在手机上确认，系统将自动完成登录
+                                                </p>
+                                            </div>
+                                        ) : (
+                                            <div className="flex flex-col items-center space-y-3 py-4 w-full">
+                                                <div className="relative">
+                                                    <div className="w-12 h-12 rounded-full border-4 border-slate-100 border-t-green-500 animate-spin"></div>
+                                                </div>
+                                                <p className="text-sm text-slate-500 animate-pulse">正在获取二维码...</p>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                                
+                                {/* Cookie 模式下的退出按钮 */}
+                                {isLoggedIn && config.login_type === 'cookie' && (
+                                    <Button 
+                                        variant="outline" 
+                                        className="w-full text-red-500 hover:text-red-600 hover:bg-red-50 mt-4"
+                                        onClick={() => {
+                                            if (window.confirm('确定要清除保存的 Cookie 吗？')) {
+                                                logoutMutation.mutate() // 修改这里，调用后端清除接口
+                                            }
+                                        }}
+                                    >
+                                        <LogOut className="mr-2 h-4 w-4" /> 清除 Cookie
+                                    </Button>
+                                )}
+                            </div>
                         )}
                       </div>
                     </DialogContent>
-                  </Dialog>
-              )}
+              </Dialog>
             </div>
           </CardHeader>
           
@@ -475,6 +582,12 @@ export function WeChatDashboard() {
           <div className="flex-shrink-0 flex items-center justify-between mb-3">
             <TabsList className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-sm p-1 h-10">
               <TabsTrigger 
+                value="account" 
+                className="gap-2 px-4 data-[state=active]:bg-green-50 data-[state=active]:text-green-700 dark:data-[state=active]:bg-green-950/30 dark:data-[state=active]:text-green-400"
+              >
+                <User className="h-4 w-4" /> 账号管理
+              </TabsTrigger>
+              <TabsTrigger 
                 value="data" 
                 className="gap-2 px-4 data-[state=active]:bg-green-50 data-[state=active]:text-green-700 dark:data-[state=active]:bg-green-950/30 dark:data-[state=active]:text-green-400"
               >
@@ -496,6 +609,10 @@ export function WeChatDashboard() {
           </div>
 
           {/* Tab 内容区 - 可滚动 */}
+          <TabsContent value="account" className="flex-1 min-h-0 mt-0 overflow-hidden">
+            <WeChatAccountManager />
+          </TabsContent>
+
           <TabsContent value="data" className="flex-1 min-h-0 mt-0 overflow-hidden">
             <WeChatDataList />
           </TabsContent>
@@ -516,4 +633,3 @@ export function WeChatDashboard() {
     </div>
   )
 }
-
