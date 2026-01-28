@@ -31,6 +31,15 @@ from proxy.proxy_mixin import ProxyRefreshMixin
 from tools import utils
 from var import request_keyword_var
 
+# 签名服务客户端（可选）
+try:
+    from api.services.sign_client import get_sign_client, SignError
+    SIGN_CLIENT_AVAILABLE = True
+except ImportError:
+    SIGN_CLIENT_AVAILABLE = False
+    get_sign_client = None
+    SignError = Exception
+
 if TYPE_CHECKING:
     from proxy.proxy_ip_pool import ProxyIpPool
 
@@ -50,6 +59,7 @@ class DouYinClient(AbstractApiClient, ProxyRefreshMixin):
         playwright_page: Optional[Page],
         cookie_dict: Dict,
         proxy_ip_pool: Optional["ProxyIpPool"] = None,
+        use_sign_server: bool = True,  # 是否使用远程签名服务
     ):
         self.proxy = proxy
         self.timeout = timeout
@@ -59,6 +69,8 @@ class DouYinClient(AbstractApiClient, ProxyRefreshMixin):
         self.cookie_dict = cookie_dict
         # 初始化代理池（来自 ProxyRefreshMixin）
         self.init_proxy_pool(proxy_ip_pool)
+        # 签名服务配置
+        self._use_sign_server = use_sign_server
 
     async def __process_req_params(
         self,
@@ -109,8 +121,45 @@ class DouYinClient(AbstractApiClient, ProxyRefreshMixin):
             post_data = params
 
         if "/v1/web/general/search" not in uri:
-            a_bogus = await get_a_bogus(uri, query_string, post_data, headers["User-Agent"], self.playwright_page)
+            # 优先使用远程签名服务
+            a_bogus = await self._get_a_bogus_sign(uri, query_string, headers["User-Agent"])
+            if not a_bogus:
+                # 降级到本地 Playwright 签名
+                a_bogus = await get_a_bogus(uri, query_string, post_data, headers["User-Agent"], self.playwright_page)
             params["a_bogus"] = a_bogus
+
+    async def _get_a_bogus_sign(self, uri: str, query_params: str, user_agent: str) -> Optional[str]:
+        """使用远程签名服务获取 a_bogus
+
+        Args:
+            uri: 请求 URI
+            query_params: URL 编码后的查询参数
+            user_agent: User-Agent
+
+        Returns:
+            a_bogus 签名，失败返回 None
+        """
+        if not self._use_sign_server or not SIGN_CLIENT_AVAILABLE:
+            return None
+
+        sign_client = get_sign_client()
+        if not sign_client or not sign_client.enabled:
+            return None
+
+        # 获取 cookie 字符串
+        cookie_str = self.headers.get("Cookie", "")
+
+        try:
+            result = await sign_client.sign_douyin(
+                uri=uri,
+                query_params=query_params,
+                user_agent=user_agent,
+                cookies=cookie_str
+            )
+            return result.a_bogus
+        except Exception as e:
+            utils.logger.warning(f"[DouYinClient] Remote sign failed: {e}")
+            return None
 
     async def request(self, method, url, **kwargs):
         # 每次请求前检测代理是否过期

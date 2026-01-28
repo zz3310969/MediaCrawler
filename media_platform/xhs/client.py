@@ -31,6 +31,15 @@ from base.base_crawler import AbstractApiClient
 from proxy.proxy_mixin import ProxyRefreshMixin
 from tools import utils
 
+# 签名服务客户端（可选）
+try:
+    from api.services.sign_client import get_sign_client, SignError
+    SIGN_CLIENT_AVAILABLE = True
+except ImportError:
+    SIGN_CLIENT_AVAILABLE = False
+    get_sign_client = None
+    SignError = Exception
+
 if TYPE_CHECKING:
     from proxy.proxy_ip_pool import ProxyIpPool
 
@@ -52,6 +61,7 @@ class XiaoHongShuClient(AbstractApiClient, ProxyRefreshMixin):
         playwright_page: Page,
         cookie_dict: Dict[str, str],
         proxy_ip_pool: Optional["ProxyIpPool"] = None,
+        use_sign_server: bool = True,  # 是否使用远程签名服务
     ):
         self.proxy = proxy
         self.timeout = timeout
@@ -67,9 +77,11 @@ class XiaoHongShuClient(AbstractApiClient, ProxyRefreshMixin):
         self._extractor = XiaoHongShuExtractor()
         # Initialize proxy pool (from ProxyRefreshMixin)
         self.init_proxy_pool(proxy_ip_pool)
+        # 签名服务配置
+        self._use_sign_server = use_sign_server
 
     async def _pre_headers(self, url: str, params: Optional[Dict] = None, payload: Optional[Dict] = None) -> Dict:
-        """Request header parameter signing (using playwright injection method)
+        """Request header parameter signing (supports remote sign server or local playwright)
 
         Args:
             url: Request URL
@@ -79,17 +91,88 @@ class XiaoHongShuClient(AbstractApiClient, ProxyRefreshMixin):
         Returns:
             Dict: Signed request header parameters
         """
-        a1_value = self.cookie_dict.get("a1", "")
-
         # Determine request data, method and URI
         if params is not None:
             data = params
-            method = "GET"
         elif payload is not None:
             data = payload
-            method = "POST"
         else:
             raise ValueError("params or payload is required")
+
+        # 优先尝试使用远程签名服务
+        if self._use_sign_server and SIGN_CLIENT_AVAILABLE:
+            sign_client = get_sign_client()
+            if sign_client and sign_client.enabled:
+                try:
+                    signs = await self._sign_with_remote_server(url, data)
+                    if signs:
+                        headers = {
+                            "X-S": signs["x-s"],
+                            "X-T": signs["x-t"],
+                            "x-S-Common": signs["x-s-common"],
+                            "X-B3-Traceid": signs["x-b3-traceid"],
+                        }
+                        # 如果有 x-mns，也添加
+                        if "x-mns" in signs:
+                            headers["X-Mns"] = signs["x-mns"]
+                        self.headers.update(headers)
+                        return self.headers
+                except SignError as e:
+                    utils.logger.warning(f"[XiaoHongShuClient] Sign server failed, fallback to playwright: {e}")
+
+        # 降级到本地 Playwright 签名
+        return await self._sign_with_playwright(url, data, params is not None)
+
+    async def _sign_with_remote_server(self, uri: str, data: Any) -> Optional[Dict[str, str]]:
+        """使用远程签名服务获取签名
+
+        Args:
+            uri: 请求 URI
+            data: 请求数据
+
+        Returns:
+            签名头字典，失败返回 None
+        """
+        if not SIGN_CLIENT_AVAILABLE:
+            return None
+
+        sign_client = get_sign_client()
+        if not sign_client or not sign_client.enabled:
+            return None
+
+        # 获取 cookie 字符串
+        cookie_str = self.headers.get("Cookie", "")
+
+        try:
+            result = await sign_client.sign_xhs(
+                uri=uri,
+                data=data,
+                cookies=cookie_str
+            )
+            return {
+                "x-s": result.x_s,
+                "x-t": result.x_t,
+                "x-s-common": result.x_s_common,
+                "x-b3-traceid": result.x_b3_traceid,
+                "x-mns": result.x_mns,
+            }
+        except Exception as e:
+            utils.logger.warning(f"[XiaoHongShuClient] Remote sign failed: {e}")
+            return None
+
+    async def _sign_with_playwright(self, url: str, data: Any, is_get: bool) -> Dict:
+        """使用本地 Playwright 进行签名
+
+        Args:
+            url: 请求 URL
+            data: 请求数据
+            is_get: 是否为 GET 请求
+
+        Returns:
+            签名后的请求头
+        """
+        a1_value = self.cookie_dict.get("a1", "")
+        method = "GET" if is_get else "POST"
 
         # Generate signature using playwright injection method
         signs = await sign_with_playwright(

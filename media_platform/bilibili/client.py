@@ -35,6 +35,15 @@ from base.base_crawler import AbstractApiClient
 from proxy.proxy_mixin import ProxyRefreshMixin
 from tools import utils
 
+# 签名服务客户端（可选）
+try:
+    from api.services.sign_client import get_sign_client, SignError
+    SIGN_CLIENT_AVAILABLE = True
+except ImportError:
+    SIGN_CLIENT_AVAILABLE = False
+    get_sign_client = None
+    SignError = Exception
+
 if TYPE_CHECKING:
     from proxy.proxy_ip_pool import ProxyIpPool
 
@@ -54,6 +63,7 @@ class BilibiliClient(AbstractApiClient, ProxyRefreshMixin):
         playwright_page: Page,
         cookie_dict: Dict[str, str],
         proxy_ip_pool: Optional["ProxyIpPool"] = None,
+        use_sign_server: bool = True,  # 是否使用远程签名服务
     ):
         self.proxy = proxy
         self.timeout = timeout
@@ -63,6 +73,8 @@ class BilibiliClient(AbstractApiClient, ProxyRefreshMixin):
         self.cookie_dict = cookie_dict
         # Initialize proxy pool (from ProxyRefreshMixin)
         self.init_proxy_pool(proxy_ip_pool)
+        # 签名服务配置
+        self._use_sign_server = use_sign_server
 
     async def request(self, method, url, **kwargs) -> Any:
         # Check if proxy has expired before each request
@@ -90,8 +102,48 @@ class BilibiliClient(AbstractApiClient, ProxyRefreshMixin):
         """
         if not req_data:
             return {}
+
+        # 优先使用远程签名服务
+        remote_sign = await self._get_remote_sign(req_data)
+        if remote_sign:
+            req_data.update(remote_sign)
+            return req_data
+
+        # 降级到本地签名
         img_key, sub_key = await self.get_wbi_keys()
         return BilibiliSign(img_key, sub_key).sign(req_data)
+
+    async def _get_remote_sign(self, req_data: Dict) -> Optional[Dict[str, str]]:
+        """使用远程签名服务获取 wts 和 w_rid
+
+        Args:
+            req_data: 请求参数
+
+        Returns:
+            包含 wts 和 w_rid 的字典，失败返回 None
+        """
+        if not self._use_sign_server or not SIGN_CLIENT_AVAILABLE:
+            return None
+
+        sign_client = get_sign_client()
+        if not sign_client or not sign_client.enabled:
+            return None
+
+        # 获取 cookie 字符串
+        cookie_str = self.headers.get("Cookie", "")
+
+        try:
+            result = await sign_client.sign_bilibili(
+                req_data=req_data,
+                cookies=cookie_str
+            )
+            return {
+                "wts": result.wts,
+                "w_rid": result.w_rid
+            }
+        except Exception as e:
+            utils.logger.warning(f"[BilibiliClient] Remote sign failed: {e}")
+            return None
 
     async def get_wbi_keys(self) -> Tuple[str, str]:
         """

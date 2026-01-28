@@ -25,68 +25,226 @@
 | 仓库 | `MediaCrawlerPro-SignSrv` |
 | 默认端口 | 8989 |
 | 协议 | HTTP/JSON |
+| 框架 | Tornado |
 
 ### 2.2 API 列表
 
 | 平台 | 接口 | 方法 | 说明 |
 |------|------|------|------|
-| 小红书 | `/api/xhs/sign` | POST | XHS 请求签名 |
-| 抖音 | `/api/douyin/sign` | POST | Douyin 请求签名 |
-| B站 | `/api/bilibili/sign` | POST | Bilibili 请求签名 |
-| 知乎 | `/api/zhihu/sign` | POST | Zhihu 请求签名 |
+| 健康检查 | `/signsrv/pong` | GET | 服务健康检查 |
+| 小红书 | `/signsrv/v1/xhs/sign` | POST | XHS 请求签名 |
+| 小红书 | `/signsrv/v1/xhs/update_browser_cookies` | POST | 更新 XHS 浏览器 cookies |
+| 抖音 | `/signsrv/v1/douyin/sign` | POST | Douyin 请求签名 |
+| B站 | `/signsrv/v1/bilibili/sign` | POST | Bilibili 请求签名 |
+| 知乎 | `/signsrv/v1/zhihu/sign` | POST | Zhihu 请求签名 |
 
-### 2.3 请求/响应格式
+### 2.3 统一响应格式
 
-#### 小红书签名
+SignSrv 使用统一的响应格式：
+
+```python
+# 成功响应
+{
+    "biz_code": 0,
+    "msg": "OK!",
+    "isok": true,
+    "data": { ... }  # 具体签名数据
+}
+
+# 失败响应
+{
+    "biz_code": 10001,  # 非 0 的错误码
+    "msg": "error message",
+    "isok": false,
+    "extra": { ... }   # 额外错误信息
+}
+```
+
+---
+
+## 三、各平台签名接口详情
+
+### 3.1 小红书签名
+
+#### 签名接口
 
 ```python
 # 请求
-POST /api/xhs/sign
+POST /signsrv/v1/xhs/sign
+Content-Type: application/json
+
 {
-    "uri": "/api/sns/web/v1/search/notes",
-    "data": "",  # POST body（可选）
-    "cookies": "...",  # 登录态 cookie
-    "a1": "xxx"  # a1 参数
+    "uri": "/api/sns/web/v1/search/notes",  # 必填，请求 URI
+    "data": null,                            # 可选，POST body 数据
+    "cookies": "a1=xxx;web_session=xxx;..."  # 必填，登录态 cookies
 }
 
 # 响应
 {
-    "code": 0,
-    "msg": "success",
+    "biz_code": 0,
+    "msg": "OK!",
+    "isok": true,
     "data": {
-        "x-s": "xxx",
-        "x-t": "xxx",
-        "x-s-common": "xxx"
+        "x_s": "xxx",
+        "x_t": "xxx",
+        "x_s_common": "xxx",
+        "x_b3_traceid": "xxx",
+        "x_mns": "xxx"
     }
 }
 ```
 
-#### 抖音签名
+#### 更新浏览器 Cookies
 
 ```python
 # 请求
-POST /api/douyin/sign
+POST /signsrv/v1/xhs/update_browser_cookies
+Content-Type: application/json
+
 {
-    "url": "https://www.douyin.com/aweme/v1/web/search/item/",
-    "user_agent": "..."
+    "cookies": "a1=xxx;web_session=xxx;..."  # 新的 cookies
 }
 
 # 响应
 {
-    "code": 0,
-    "msg": "success",
+    "biz_code": 0,
+    "msg": "update xhs sign server browser cookies success",
+    "isok": true,
+    "data": {}
+}
+```
+
+### 3.2 抖音签名
+
+```python
+# 请求
+POST /signsrv/v1/douyin/sign
+Content-Type: application/json
+
+{
+    "uri": "/aweme/v1/web/search/item/",      # 必填，请求 URI
+    "query_params": "keyword=test&count=20",  # 必填，URL 编码后的查询参数
+    "user_agent": "Mozilla/5.0 ...",          # 必填，User-Agent
+    "cookies": "ttwid=xxx;..."                # 必填，登录态 cookies
+}
+
+# 响应
+{
+    "biz_code": 0,
+    "msg": "OK!",
+    "isok": true,
     "data": {
-        "a_bogus": "xxx",
-        "ttwid": "xxx"
+        "a_bogus": "xxx"
+    }
+}
+```
+
+### 3.3 B站签名
+
+```python
+# 请求
+POST /signsrv/v1/bilibili/sign
+Content-Type: application/json
+
+{
+    "req_data": {                    # 必填，JSON 格式的请求参数
+        "keyword": "test",
+        "page": 1,
+        "page_size": 20
+    },
+    "cookies": "bili_ticket=xxx;..." # 必填，登录态 cookies
+}
+
+# 响应
+{
+    "biz_code": 0,
+    "msg": "OK!",
+    "isok": true,
+    "data": {
+        "wts": "xxx",
+        "w_rid": "xxx"
+    }
+}
+```
+
+### 3.4 知乎签名
+
+```python
+# 请求
+POST /signsrv/v1/zhihu/sign
+Content-Type: application/json
+
+{
+    "uri": "/api/v4/search_v3",       # 必填，请求 URI
+    "cookies": "z_c0=xxx;..."         # 必填，登录态 cookies
+}
+
+# 响应
+{
+    "biz_code": 0,
+    "msg": "OK!",
+    "isok": true,
+    "data": {
+        "x_zst_81": "xxx",
+        "x_zse_96": "xxx"
+    }
+}
+```
+
+### 3.5 健康检查
+
+```python
+# 请求
+GET /signsrv/pong
+
+# 响应
+{
+    "biz_code": 0,
+    "msg": "OK!",
+    "isok": true,
+    "data": {
+        "message": "pong"
     }
 }
 ```
 
 ---
 
-## 三、签名客户端封装
+## 四、签名客户端封装
 
-### 3.1 基础客户端 (`api/services/sign_client.py`)
+### 4.1 响应模型 (`api/services/sign_client.py`)
+
+```python
+from pydantic import BaseModel
+
+
+class XhsSignResult(BaseModel):
+    """小红书签名结果"""
+    x_s: str
+    x_t: str
+    x_s_common: str
+    x_b3_traceid: str
+    x_mns: str
+
+
+class DouyinSignResult(BaseModel):
+    """抖音签名结果"""
+    a_bogus: str
+
+
+class BilibiliSignResult(BaseModel):
+    """B站签名结果"""
+    wts: str
+    w_rid: str
+
+
+class ZhihuSignResult(BaseModel):
+    """知乎签名结果"""
+    x_zst_81: str
+    x_zse_96: str
+```
+
+### 4.2 签名客户端 (`api/services/sign_client.py`)
 
 ```python
 import httpx
@@ -113,6 +271,14 @@ class SignError(Exception):
 
 class SignClient:
     """签名服务客户端"""
+    
+    # API 路径常量
+    API_XHS_SIGN = "/signsrv/v1/xhs/sign"
+    API_XHS_UPDATE_COOKIES = "/signsrv/v1/xhs/update_browser_cookies"
+    API_DOUYIN_SIGN = "/signsrv/v1/douyin/sign"
+    API_BILIBILI_SIGN = "/signsrv/v1/bilibili/sign"
+    API_ZHIHU_SIGN = "/signsrv/v1/zhihu/sign"
+    API_HEALTH = "/signsrv/pong"
     
     def __init__(self, config: SignConfig):
         self._config = config
@@ -144,7 +310,8 @@ class SignClient:
                 response.raise_for_status()
                 
                 result = response.json()
-                if result.get("code") != 0:
+                # SignSrv 使用 biz_code 字段
+                if result.get("biz_code") != 0:
                     raise SignError(f"Sign error: {result.get('msg')}")
                 
                 return result.get("data", {})
@@ -154,61 +321,88 @@ class SignClient:
                 if attempt == self._config.retry_count:
                     raise SignError(f"Sign request failed after {attempt + 1} attempts")
     
-    # ========== 平台签名方法 ==========
+    # ========== 小红书 ==========
     
     async def sign_xhs(
         self,
         uri: str,
-        data: str = "",
-        cookies: str = "",
-        a1: str = ""
-    ) -> Dict[str, str]:
+        data: Any = None,
+        cookies: str = ""
+    ) -> XhsSignResult:
         """小红书签名"""
-        return await self._request("/api/xhs/sign", {
+        result = await self._request(self.API_XHS_SIGN, {
             "uri": uri,
             "data": data,
-            "cookies": cookies,
-            "a1": a1
+            "cookies": cookies
         })
+        return XhsSignResult(**result)
+    
+    async def update_xhs_cookies(self, cookies: str) -> bool:
+        """更新小红书浏览器 cookies"""
+        try:
+            await self._request(self.API_XHS_UPDATE_COOKIES, {"cookies": cookies})
+            return True
+        except SignError:
+            return False
+    
+    # ========== 抖音 ==========
     
     async def sign_douyin(
         self,
-        url: str,
-        user_agent: str = ""
-    ) -> Dict[str, str]:
+        uri: str,
+        query_params: str,
+        user_agent: str,
+        cookies: str
+    ) -> DouyinSignResult:
         """抖音签名"""
-        return await self._request("/api/douyin/sign", {
-            "url": url,
-            "user_agent": user_agent
+        result = await self._request(self.API_DOUYIN_SIGN, {
+            "uri": uri,
+            "query_params": query_params,
+            "user_agent": user_agent,
+            "cookies": cookies
         })
+        return DouyinSignResult(**result)
+    
+    # ========== B站 ==========
     
     async def sign_bilibili(
         self,
-        params: Dict[str, Any]
-    ) -> Dict[str, str]:
+        req_data: Dict[str, Any],
+        cookies: str
+    ) -> BilibiliSignResult:
         """B站签名"""
-        return await self._request("/api/bilibili/sign", {
-            "params": params
+        result = await self._request(self.API_BILIBILI_SIGN, {
+            "req_data": req_data,
+            "cookies": cookies
         })
+        return BilibiliSignResult(**result)
+    
+    # ========== 知乎 ==========
     
     async def sign_zhihu(
         self,
-        url: str,
-        cookies: str = ""
-    ) -> Dict[str, str]:
+        uri: str,
+        cookies: str
+    ) -> ZhihuSignResult:
         """知乎签名"""
-        return await self._request("/api/zhihu/sign", {
-            "url": url,
+        result = await self._request(self.API_ZHIHU_SIGN, {
+            "uri": uri,
             "cookies": cookies
         })
+        return ZhihuSignResult(**result)
+    
+    # ========== 健康检查 ==========
     
     async def health_check(self) -> bool:
         """健康检查"""
         try:
             if not self._client:
                 return False
-            response = await self._client.get("/health")
-            return response.status_code == 200
+            response = await self._client.get(self.API_HEALTH)
+            if response.status_code == 200:
+                result = response.json()
+                return result.get("biz_code") == 0
+            return False
         except Exception:
             return False
 
@@ -225,6 +419,14 @@ async def init_sign_client(config: SignConfig) -> SignClient:
     global _sign_client
     _sign_client = SignClient(config)
     await _sign_client.__aenter__()
+    
+    if config.enabled:
+        is_healthy = await _sign_client.health_check()
+        if is_healthy:
+            logger.info(f"Sign client connected to {config.url}")
+        else:
+            logger.warning(f"Sign server at {config.url} is not available")
+    
     return _sign_client
 
 
@@ -233,19 +435,23 @@ async def close_sign_client():
     if _sign_client:
         await _sign_client.__aexit__(None, None, None)
         _sign_client = None
+
+
+def is_sign_server_enabled() -> bool:
+    return _sign_client is not None and _sign_client.enabled
 ```
 
 ---
 
-## 四、平台客户端改造
+## 五、平台客户端改造
 
-### 4.1 XHS 客户端改造示例
+### 5.1 XHS 客户端改造示例
 
 ```python
 # media_platform/xhs/client.py
 
 from typing import Optional, Dict
-from api.services.sign_client import get_sign_client, SignError
+from api.services.sign_client import get_sign_client, SignError, XhsSignResult
 
 
 class XHSClient:
@@ -255,33 +461,38 @@ class XHSClient:
         self,
         cookies: str,
         user_agent: str,
-        use_sign_server: bool = True  # 新增参数
+        use_sign_server: bool = True
     ):
         self._cookies = cookies
         self._user_agent = user_agent
         self._use_sign_server = use_sign_server
-        self._a1 = self._extract_a1(cookies)
     
-    async def _get_sign_headers(self, uri: str, data: str = "") -> Dict[str, str]:
+    async def _get_sign_headers(self, uri: str, data: Any = None) -> Dict[str, str]:
         """获取签名头"""
         sign_client = get_sign_client()
         
         # 优先使用签名服务
         if self._use_sign_server and sign_client and sign_client.enabled:
             try:
-                return await sign_client.sign_xhs(
+                result: XhsSignResult = await sign_client.sign_xhs(
                     uri=uri,
                     data=data,
-                    cookies=self._cookies,
-                    a1=self._a1
+                    cookies=self._cookies
                 )
+                return {
+                    "x-s": result.x_s,
+                    "x-t": result.x_t,
+                    "x-s-common": result.x_s_common,
+                    "x-b3-traceid": result.x_b3_traceid,
+                    "x-mns": result.x_mns
+                }
             except SignError as e:
                 logger.warning(f"Sign server failed, fallback to local: {e}")
         
         # 降级到本地签名（需要 Playwright）
         return await self._local_sign(uri, data)
     
-    async def _local_sign(self, uri: str, data: str) -> Dict[str, str]:
+    async def _local_sign(self, uri: str, data: Any) -> Dict[str, str]:
         """本地签名（Playwright）"""
         # 原有的 Playwright 签名逻辑
         # ...
@@ -311,12 +522,86 @@ class XHSClient:
             return response.json()
 ```
 
-### 4.2 配置集成
+### 5.2 抖音客户端改造示例
+
+```python
+# media_platform/douyin/client.py
+
+from urllib.parse import urlencode
+from api.services.sign_client import get_sign_client, SignError, DouyinSignResult
+
+
+class DouyinClient:
+    """抖音客户端"""
+    
+    async def _get_sign_params(
+        self,
+        uri: str,
+        params: Dict[str, Any]
+    ) -> Dict[str, str]:
+        """获取签名参数"""
+        sign_client = get_sign_client()
+        
+        if sign_client and sign_client.enabled:
+            try:
+                query_params = urlencode(params)
+                result: DouyinSignResult = await sign_client.sign_douyin(
+                    uri=uri,
+                    query_params=query_params,
+                    user_agent=self._user_agent,
+                    cookies=self._cookies
+                )
+                return {"a_bogus": result.a_bogus}
+            except SignError as e:
+                logger.warning(f"Sign server failed: {e}")
+        
+        return await self._local_sign(uri, params)
+```
+
+### 5.3 B站客户端改造示例
+
+```python
+# media_platform/bilibili/client.py
+
+from api.services.sign_client import get_sign_client, SignError, BilibiliSignResult
+
+
+class BilibiliClient:
+    """B站客户端"""
+    
+    async def _get_sign_params(
+        self,
+        req_data: Dict[str, Any]
+    ) -> Dict[str, str]:
+        """获取签名参数"""
+        sign_client = get_sign_client()
+        
+        if sign_client and sign_client.enabled:
+            try:
+                result: BilibiliSignResult = await sign_client.sign_bilibili(
+                    req_data=req_data,
+                    cookies=self._cookies
+                )
+                return {
+                    "wts": result.wts,
+                    "w_rid": result.w_rid
+                }
+            except SignError as e:
+                logger.warning(f"Sign server failed: {e}")
+        
+        return await self._local_sign(req_data)
+```
+
+---
+
+## 六、配置集成
+
+### 6.1 配置类
 
 ```python
 # config/sign_server.py
 
-from pydantic import BaseSettings
+from pydantic_settings import BaseSettings
 
 
 class SignServerSettings(BaseSettings):
@@ -328,13 +613,13 @@ class SignServerSettings(BaseSettings):
     sign_server_retry: int = 2
     
     # 降级策略
-    sign_fallback_enabled: bool = True  # 签名服务失败时是否降级到本地
+    sign_fallback_enabled: bool = True
     
     class Config:
         env_prefix = "MC_"
 ```
 
-### 4.3 启动时初始化
+### 6.2 启动时初始化
 
 ```python
 # api/main.py
@@ -356,11 +641,7 @@ async def lifespan(app: FastAPI):
             timeout=settings.sign_server_timeout,
             retry_count=settings.sign_server_retry
         )
-        sign_client = await init_sign_client(config)
-        
-        # 健康检查
-        if not await sign_client.health_check():
-            logger.warning("Sign server not available")
+        await init_sign_client(config)
     
     yield
     
@@ -370,9 +651,9 @@ async def lifespan(app: FastAPI):
 
 ---
 
-## 五、命令行参数支持
+## 七、命令行参数支持
 
-### 5.1 main.py 改造
+### 7.1 main.py 改造
 
 ```python
 # main.py
@@ -419,9 +700,9 @@ async def main():
 
 ---
 
-## 六、测试用例
+## 八、测试用例
 
-### 6.1 签名客户端测试
+### 8.1 签名客户端测试
 
 ```python
 import pytest
@@ -440,17 +721,63 @@ async def sign_client():
 
 
 @pytest.mark.asyncio
+async def test_health_check(sign_client):
+    """测试健康检查"""
+    result = await sign_client.health_check()
+    assert result == True
+
+
+@pytest.mark.asyncio
 async def test_xhs_sign(sign_client):
     """测试小红书签名"""
     result = await sign_client.sign_xhs(
         uri="/api/sns/web/v1/search/notes",
-        data="",
-        cookies="a1=xxx;",
-        a1="xxx"
+        data=None,
+        cookies="a1=xxx;web_session=xxx"
     )
     
-    assert "x-s" in result
-    assert "x-t" in result
+    assert result.x_s is not None
+    assert result.x_t is not None
+    assert result.x_s_common is not None
+    assert result.x_b3_traceid is not None
+    assert result.x_mns is not None
+
+
+@pytest.mark.asyncio
+async def test_douyin_sign(sign_client):
+    """测试抖音签名"""
+    result = await sign_client.sign_douyin(
+        uri="/aweme/v1/web/search/item/",
+        query_params="keyword=test&count=20",
+        user_agent="Mozilla/5.0 ...",
+        cookies="ttwid=xxx"
+    )
+    
+    assert result.a_bogus is not None
+
+
+@pytest.mark.asyncio
+async def test_bilibili_sign(sign_client):
+    """测试B站签名"""
+    result = await sign_client.sign_bilibili(
+        req_data={"keyword": "test", "page": 1},
+        cookies="bili_ticket=xxx"
+    )
+    
+    assert result.wts is not None
+    assert result.w_rid is not None
+
+
+@pytest.mark.asyncio
+async def test_zhihu_sign(sign_client):
+    """测试知乎签名"""
+    result = await sign_client.sign_zhihu(
+        uri="/api/v4/search_v3",
+        cookies="z_c0=xxx"
+    )
+    
+    assert result.x_zst_81 is not None
+    assert result.x_zse_96 is not None
 
 
 @pytest.mark.asyncio
@@ -465,17 +792,10 @@ async def test_sign_server_unavailable():
     
     async with SignClient(config) as client:
         with pytest.raises(SignError):
-            await client.sign_xhs(uri="/test")
-
-
-@pytest.mark.asyncio
-async def test_health_check(sign_client):
-    """测试健康检查"""
-    result = await sign_client.health_check()
-    assert result == True
+            await client.sign_xhs(uri="/test", cookies="test")
 ```
 
-### 6.2 集成测试
+### 8.2 集成测试
 
 ```python
 @pytest.mark.asyncio
@@ -496,9 +816,9 @@ async def test_xhs_search_with_sign_server():
 
 ---
 
-## 七、部署配置
+## 九、部署配置
 
-### 7.1 Docker Compose
+### 9.1 Docker Compose
 
 ```yaml
 # docker-compose.yml
@@ -513,9 +833,11 @@ services:
     ports:
       - "8989:8989"
     environment:
-      - SIGN_MODE=js  # js 或 playwright
+      - SIGN_TYPE=javascript  # 或 playwright
+      - APP_PORT=8989
+      - APP_ADDRESS=0.0.0.0
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8989/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8989/signsrv/pong"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -544,7 +866,7 @@ services:
       replicas: 2
 ```
 
-### 7.2 环境变量
+### 9.2 环境变量
 
 ```bash
 # .env
@@ -561,9 +883,9 @@ MC_SIGN_FALLBACK_ENABLED=true
 
 ---
 
-## 八、监控与告警
+## 十、监控与告警
 
-### 8.1 指标采集
+### 10.1 指标采集
 
 ```python
 from prometheus_client import Counter, Histogram
@@ -584,7 +906,7 @@ sign_latency_seconds = Histogram(
 
 # 在 SignClient 中使用
 async def _request(self, path: str, data: Dict[str, Any]) -> Dict[str, Any]:
-    platform = path.split("/")[2]  # /api/{platform}/sign
+    platform = path.split("/")[3]  # /signsrv/v1/{platform}/sign
     
     with sign_latency_seconds.labels(platform=platform).time():
         try:
@@ -596,7 +918,7 @@ async def _request(self, path: str, data: Dict[str, Any]) -> Dict[str, Any]:
             raise
 ```
 
-### 8.2 告警规则（Prometheus）
+### 10.2 告警规则（Prometheus）
 
 ```yaml
 groups:
@@ -621,9 +943,11 @@ groups:
 
 ---
 
-## 九、验收标准
+## 十一、验收标准
 
 - [ ] 签名客户端正确封装
+- [ ] API 路径与 SignSrv 一致 (`/signsrv/v1/...`)
+- [ ] 响应解析正确 (`biz_code` 字段)
 - [ ] XHS/Douyin/Bilibili/Zhihu 支持远程签名
 - [ ] 降级策略生效（签名服务不可用时使用本地）
 - [ ] 命令行参数 `--sign-server` 可用
@@ -633,4 +957,3 @@ groups:
 ---
 
 *文档结束*
-

@@ -76,7 +76,8 @@ BROWSER_LAUNCH_TIMEOUT = 60
 AUTO_CLOSE_BROWSER = True
 
 # 数据保存类型选项配置,支持六种类型：csv、db、json、sqlite、excel、postgres, 最好保存到DB，有排重的功能。
-SAVE_DATA_OPTION = "json"  # csv or db or json or sqlite or excel or postgres
+# 注意：微信公众号等API查询功能需要使用数据库存储（db/sqlite/postgres）
+SAVE_DATA_OPTION = "db"  # csv or db or json or sqlite or excel or postgres
 
 # 用户浏览器缓存的浏览器文件配置
 USER_DATA_DIR = "%s_user_data_dir"  # %s will be replaced by platform name
@@ -205,6 +206,20 @@ PROXY_RETRY_COUNT = 3
 
 # 代理验证超时时间（秒）
 PROXY_VALIDATE_TIMEOUT = 10
+
+# ==================== 签名服务配置 ====================
+# 是否启用远程签名服务（MediaCrawlerPro-SignSrv）
+# 启用后，会优先使用远程签名服务，失败时降级到本地 Playwright 签名
+SIGN_SERVER_ENABLED = False
+
+# 签名服务地址
+SIGN_SERVER_URL = "http://localhost:8989"
+
+# 签名服务请求超时时间（秒）
+SIGN_SERVER_TIMEOUT = 10.0
+
+# 签名服务请求重试次数
+SIGN_SERVER_RETRY_COUNT = 2
 
 from .bilibili_config import *
 from .xhs_config import *

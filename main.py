@@ -47,6 +47,13 @@ from media_platform.zhihu import ZhihuCrawler
 from tools.async_file_writer import AsyncFileWriter
 from var import crawler_type_var
 
+# 签名服务客户端
+from api.services.sign_client import (
+    init_sign_client,
+    close_sign_client,
+    SignConfig,
+)
+
 
 class CrawlerFactory:
     CRAWLERS: dict[str, Type[AbstractCrawler]] = {
@@ -99,6 +106,27 @@ async def _generate_wordcloud_if_needed() -> None:
         print(f"[Main] Error generating wordcloud: {e}")
 
 
+async def _init_sign_server() -> None:
+    """初始化签名服务客户端"""
+    if not config.SIGN_SERVER_ENABLED:
+        return
+
+    print(f"[Main] 正在连接签名服务 {config.SIGN_SERVER_URL}...")
+    sign_config = SignConfig(
+        enabled=True,
+        url=config.SIGN_SERVER_URL,
+        timeout=config.SIGN_SERVER_TIMEOUT,
+        retry_count=config.SIGN_SERVER_RETRY_COUNT,
+    )
+    client = await init_sign_client(sign_config)
+
+    # 健康检查
+    if await client.health_check():
+        print(f"[Main] ✓ 签名服务连接成功")
+    else:
+        print(f"[Main] ⚠ 签名服务不可用，将使用本地 Playwright 签名")
+
+
 async def main() -> None:
     global crawler
 
@@ -116,6 +144,9 @@ async def main() -> None:
             print(f"[Main] 当前数据库类型: {config.SAVE_DATA_OPTION}")
             return
         print(f"[Main] ✓ 数据库连接验证成功")
+
+    # 初始化签名服务
+    await _init_sign_server()
 
     crawler = CrawlerFactory.create_crawler(platform=config.PLATFORM)
     await crawler.start()
@@ -145,6 +176,9 @@ async def async_cleanup() -> None:
                 error_msg = str(e).lower()
                 if "closed" not in error_msg and "disconnected" not in error_msg:
                     print(f"[Main] Error closing browser context: {e}")
+
+    # 关闭签名服务客户端
+    await close_sign_client()
 
     if config.SAVE_DATA_OPTION in ("db", "sqlite"):
         await db.close()
