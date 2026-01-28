@@ -21,4 +21,18 @@ from .data import router as data_router
 from .websocket import router as websocket_router
 from .wechat import router as wechat_router
 
-__all__ = ["crawler_router", "data_router", "websocket_router", "wechat_router"]
+# Multi-task routers
+from .auth import router as auth_router
+from .tasks import router as tasks_router
+from .ws_tasks import router as ws_tasks_router
+
+__all__ = [
+    "crawler_router",
+    "data_router",
+    "websocket_router",
+    "wechat_router",
+    # Multi-task
+    "auth_router",
+    "tasks_router",
+    "ws_tasks_router",
+]

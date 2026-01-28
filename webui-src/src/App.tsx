@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider, useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useEffect } from 'react'
-import { AlertTriangle } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { AlertTriangle, LayoutGrid, List, Activity } from 'lucide-react'
 import { TargetConfig } from './components/TargetConfig'
 import { LoginConfig } from './components/LoginConfig'
 import { OutputConfig } from './components/OutputConfig'
@@ -12,8 +12,16 @@ import { ThemeToggle } from './components/ThemeToggle'
 import { ToastContainer, toast } from './components/ui/toast'
 import { Button } from './components/ui/button'
 import { useCrawlerConfig } from './hooks/useCrawlerConfig'
-import { crawlerApi, type CrawlerType } from './api/crawler'
+import { crawlerApi } from './api/crawler'
 import { QUERY_CONFIG } from './lib/constants'
+
+// Multi-task imports
+import { TaskDashboard } from './components/TaskDashboard'
+import { TaskList } from './components/TaskList'
+import { TaskDetail } from './components/TaskDetail'
+import { TaskCreate } from './components/TaskCreate'
+import { useSession } from './hooks/useSession'
+import { Task } from './types/task'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -24,41 +32,112 @@ const queryClient = new QueryClient({
   },
 })
 
+function MultiTaskView() {
+  const { session, loading: sessionLoading } = useSession()
+  const [view, setView] = useState<'dashboard' | 'list' | 'detail'>('dashboard')
+  const [selectedTask, setSelectedTask] = useState<Task | null>(null)
+  const [createOpen, setCreateOpen] = useState(false)
+
+  if (sessionLoading) {
+    return <div className="flex items-center justify-center h-full">Loading session...</div>
+  }
+
+  const handleTaskSelect = (task: Task) => {
+    setSelectedTask(task)
+    setView('detail')
+  }
+
+  const handleCreateSuccess = (taskId: string) => {
+    // Optionally auto-select the new task or just refresh
+    toast.success('任务创建成功')
+  }
+
+  return (
+    <div className="h-full flex flex-col space-y-4">
+      {/* Sub-navigation for Multi-task */}
+      {view !== 'detail' && (
+        <div className="flex gap-2 border-b pb-2">
+          <Button 
+            variant={view === 'dashboard' ? 'default' : 'ghost'} 
+            size="sm" 
+            onClick={() => setView('dashboard')}
+          >
+            <LayoutGrid className="w-4 h-4 mr-2" />
+            仪表盘
+          </Button>
+          <Button 
+            variant={view === 'list' ? 'default' : 'ghost'} 
+            size="sm" 
+            onClick={() => setView('list')}
+          >
+            <List className="w-4 h-4 mr-2" />
+            任务列表
+          </Button>
+        </div>
+      )}
+
+      <div className="flex-1 overflow-y-auto min-h-0">
+        {view === 'dashboard' && (
+          <TaskDashboard 
+            onTaskSelect={handleTaskSelect}
+            onCreateTask={() => setCreateOpen(true)}
+          />
+        )}
+        
+        {view === 'list' && (
+          <TaskList 
+            onTaskSelect={handleTaskSelect}
+            onCreateTask={() => setCreateOpen(true)}
+          />
+        )}
+        
+        {view === 'detail' && selectedTask && session && (
+          <TaskDetail 
+            taskId={selectedTask.task_id}
+            sessionId={session.session_id}
+            onBack={() => {
+              setView('dashboard')
+              setSelectedTask(null)
+            }}
+          />
+        )}
+      </div>
+
+      <TaskCreate 
+        open={createOpen} 
+        onClose={() => setCreateOpen(false)}
+        onCreated={handleCreateSuccess}
+      />
+    </div>
+  )
+}
+
 function MainApp() {
   const queryClient = useQueryClient()
+  const [mode, setMode] = useState<'classic' | 'multitask'>('classic')
   
-  // 使用自定义 Hook 管理配置
+  // Classic mode hooks
   const { config, updateConfig, handleCrawlerTypeChange, handleLoginTypeChange } = useCrawlerConfig()
-
-  // 查询爬虫状态
   const { data: statusResponse } = useQuery({
     queryKey: ['crawler-status'],
     queryFn: crawlerApi.getStatus,
     refetchInterval: QUERY_CONFIG.STATUS_REFETCH_INTERVAL,
+    enabled: mode === 'classic', // Only fetch in classic mode
   })
   
   const status = statusResponse?.data
 
-  // 监听并自动保存新获取的 Cookie 和 Token
   useEffect(() => {
     if (status?.new_cookies && status.new_cookies !== config.cookies) {
       toast.success('已自动捕获并保存登录凭证(Cookie)！')
       updateConfig({ cookies: status.new_cookies })
     }
-    // Token 通常是隐藏保存或作为参数传递，这里我们假设 config 中有位置保存它，或者通过 cookies 隐式处理
-    // 如果 config.wechat_token 存在则保存
     if (status?.new_token) {
-        // 这里假设我们扩展 config 来保存 token，或者将其放入 localStorage
-        // 简单起见，我们暂且不显式保存到 config 界面（因为界面上没地方填 token），而是利用 cookie 中的 token
-        // 但如果后端 API 需要独立的 token 参数，我们需要在 config 中增加字段
-        // 检查 useCrawlerConfig.ts 是否有 wechat_token
-        // 暂时先只打印日志，稍后我们在 useCrawlerConfig 中添加 wechat_token
         console.log('New Token captured:', status.new_token)
         updateConfig({ wechat_token: status.new_token } as any)
     }
   }, [status?.new_cookies, status?.new_token, config.cookies, updateConfig])
 
-  // 启动爬虫
   const startMutation = useMutation({
     mutationFn: crawlerApi.start,
     onSuccess: () => {
@@ -70,7 +149,6 @@ function MainApp() {
     },
   })
 
-  // 停止爬虫
   const stopMutation = useMutation({
     mutationFn: crawlerApi.stop,
     onSuccess: () => {
@@ -88,18 +166,13 @@ function MainApp() {
     if (isRunning) {
       stopMutation.mutate()
     } else {
-      // 根据爬取类型正确映射字段
       const requestData = { ...config }
-      
-      // creator_vip 模式：creator_ids → vip_creator_ids
       if (config.crawler_type === 'creator_vip') {
         requestData.vip_creator_ids = config.creator_ids
-        requestData.creator_ids = ''  // 清空普通创作者ID
+        requestData.creator_ids = ''
       } else if (config.crawler_type === 'creator') {
-        // creator 模式：保持 creator_ids
-        requestData.vip_creator_ids = ''  // 清空VIP创作者ID
+        requestData.vip_creator_ids = ''
       }
-      
       startMutation.mutate(requestData)
     }
   }
@@ -114,139 +187,165 @@ function MainApp() {
               <span className="text-2xl">🕷️</span>
               <span>MediaCrawler</span>
             </h1>
-            <button className="px-3 py-1 text-xs border border-gray-300 dark:border-gray-700 rounded hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-400">
-              ⭐ Star
-            </button>
+            
+            {/* 模式切换 */}
+            <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-lg ml-4">
+              <button 
+                onClick={() => setMode('classic')} 
+                className={`px-3 py-1 text-xs rounded-md transition-all ${
+                  mode === 'classic' 
+                    ? 'bg-white dark:bg-slate-700 shadow-sm font-medium text-slate-900 dark:text-white' 
+                    : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+                }`}
+              >
+                经典模式
+              </button>
+              <button 
+                onClick={() => setMode('multitask')} 
+                className={`px-3 py-1 text-xs rounded-md transition-all ${
+                  mode === 'multitask' 
+                    ? 'bg-white dark:bg-slate-700 shadow-sm font-medium text-slate-900 dark:text-white' 
+                    : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+                }`}
+              >
+                多任务 Pro
+              </button>
+            </div>
           </div>
           
-          {/* 警告横幅 */}
-          <div className="flex items-center gap-2 px-4 py-2 bg-orange-500/10 border border-orange-500/20 rounded-lg">
-            <AlertTriangle className="h-4 w-4 text-orange-400" />
-            <span className="text-xs text-orange-400">
-              1. 本项目仅供个人学习研究使用 &nbsp;&nbsp; 2. 严禁将其用于任何商业用途或违法活动
-            </span>
-          </div>
+          {mode === 'classic' && (
+            <div className="flex items-center gap-2 px-4 py-2 bg-orange-500/10 border border-orange-500/20 rounded-lg hidden md:flex">
+              <AlertTriangle className="h-4 w-4 text-orange-400" />
+              <span className="text-xs text-orange-400">
+                仅供个人学习研究使用，严禁商用
+              </span>
+            </div>
+          )}
 
           <div className="flex items-center gap-3 text-sm text-gray-400">
             <ThemeToggle />
-            <span>🌐 中文</span>
-            <span className="text-green-400">API: v1.0.0</span>
-            <span className="flex items-center gap-1">
-              本地 <span className="w-2 h-2 bg-green-500 rounded-full"></span>
-            </span>
+            <span className="hidden sm:inline">🌐 中文</span>
+            <span className="text-green-400 hidden sm:inline">API: v2.0.0</span>
           </div>
         </div>
       </header>
 
       {/* 主内容区 */}
-      <main className="flex-1 container mx-auto px-6 py-3 overflow-y-auto">
-        {/* 平台选择横条 */}
-        <div className="flex items-center gap-2 mb-3 p-2 bg-white/50 dark:bg-slate-900/50 rounded-lg border border-slate-200 dark:border-slate-700">
-          <span className="text-sm font-medium text-slate-600 dark:text-slate-400 mr-2">平台:</span>
-          {[
-            { value: 'xhs', label: '小红书', icon: '🔴' },
-            { value: 'dy', label: '抖音', icon: '🎵' },
-            { value: 'ks', label: '快手', icon: '⚡' },
-            { value: 'bili', label: 'B站', icon: '📺' },
-            { value: 'wb', label: '微博', icon: '🔷' },
-            { value: 'wechat', label: '微信公众号', icon: '💬' },
-            { value: 'tieba', label: '贴吧', icon: '🗣️' },
-            { value: 'zhihu', label: '知乎', icon: '💡' },
-          ].map((p) => (
-            <button
-              key={p.value}
-              onClick={() => updateConfig({ platform: p.value as any })}
-              disabled={isRunning}
-              className={`px-3 py-1.5 text-xs rounded-md transition-all ${
-                config.platform === p.value
-                  ? 'bg-gradient-to-r from-cyan-500 to-blue-500 text-white shadow-md'
-                  : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'
-              } ${isRunning ? 'opacity-50 cursor-not-allowed' : ''}`}
-            >
-              {p.icon} {p.label}
-            </button>
-          ))}
-        </div>
-
-        {/* 进度面板 */}
-        <ProgressPanel 
-          progress={status?.progress}
-          isRunning={isRunning}
-          platform={config.platform}
-        />
-
-        {/* 微信平台使用全新的仪表盘布局 */}
-        {config.platform === 'wechat' ? (
-          <WeChatDashboard />
+      <main className="flex-1 container mx-auto px-6 py-3 overflow-hidden flex flex-col">
+        {mode === 'multitask' ? (
+          <MultiTaskView />
         ) : (
-          /* 其他平台使用经典三列布局 */
-          <>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
-              {/* 目标配置 */}
-              <TargetConfig
-                crawlerType={config.crawler_type}
-                keywords={config.keywords || ''}
-                specifiedIds={config.specified_ids || ''}
-                creatorIds={config.creator_ids || ''}
-                startPage={config.start_page || 1}
-                disabled={isRunning}
-                onCrawlerTypeChange={handleCrawlerTypeChange}
-                onKeywordsChange={(value) => updateConfig({ keywords: value })}
-                onSpecifiedIdsChange={(value) => updateConfig({ specified_ids: value })}
-                onCreatorIdsChange={(value) => updateConfig({ creator_ids: value })}
-                onStartPageChange={(value) => updateConfig({ start_page: value })}
-              />
-
-              {/* 登录配置 */}
-              <LoginConfig
-                platform={config.platform}
-                loginType={config.login_type}
-                cookies={config.cookies}
-                disabled={isRunning}
-                onLoginTypeChange={handleLoginTypeChange}
-                onCookiesChange={(value) => updateConfig({ cookies: value })}
-              />
-
-              {/* 输出配置 */}
-              <OutputConfig
-                platform={config.platform}
-                saveOption={config.save_option || 'json'}
-                enableComments={config.enable_comments || false}
-                enableSubComments={config.enable_sub_comments || false}
-                headless={config.headless || false}
-                enableIncremental={config.enable_incremental || false}
-                incrementalThreshold={config.incremental_early_stop || 3}
-                crawlerType={config.crawler_type}
-                disabled={isRunning}
-                onSaveOptionChange={(value) => updateConfig({ save_option: value })}
-                onEnableCommentsChange={(value) => updateConfig({ enable_comments: value })}
-                onEnableSubCommentsChange={(value) => updateConfig({ enable_sub_comments: value })}
-                onHeadlessChange={(value) => updateConfig({ headless: value })}
-                onEnableIncrementalChange={(value) => updateConfig({ enable_incremental: value })}
-                onIncrementalThresholdChange={(value) => updateConfig({ incremental_early_stop: value })}
-              />
+          /* 经典模式内容 */
+          <div className="flex-1 overflow-y-auto">
+            {/* 平台选择横条 */}
+            <div className="flex items-center gap-2 mb-3 p-2 bg-white/50 dark:bg-slate-900/50 rounded-lg border border-slate-200 dark:border-slate-700 overflow-x-auto">
+              <span className="text-sm font-medium text-slate-600 dark:text-slate-400 mr-2 flex-shrink-0">平台:</span>
+              {[
+                { value: 'xhs', label: '小红书', icon: '🔴' },
+                { value: 'dy', label: '抖音', icon: '🎵' },
+                { value: 'ks', label: '快手', icon: '⚡' },
+                { value: 'bili', label: 'B站', icon: '📺' },
+                { value: 'wb', label: '微博', icon: '🔷' },
+                { value: 'wechat', label: '微信公众号', icon: '💬' },
+                { value: 'tieba', label: '贴吧', icon: '🗣️' },
+                { value: 'zhihu', label: '知乎', icon: '💡' },
+              ].map((p) => (
+                <button
+                  key={p.value}
+                  onClick={() => updateConfig({ platform: p.value as any })}
+                  disabled={isRunning}
+                  className={`px-3 py-1.5 text-xs rounded-md transition-all flex-shrink-0 ${
+                    config.platform === p.value
+                      ? 'bg-gradient-to-r from-cyan-500 to-blue-500 text-white shadow-md'
+                      : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'
+                  } ${isRunning ? 'opacity-50 cursor-not-allowed' : ''}`}
+                >
+                  {p.icon} {p.label}
+                </button>
+              ))}
             </div>
 
-            {/* 启动按钮 */}
-            <div className="mb-3">
-              <Button
-                onClick={handleStartStop}
-                disabled={startMutation.isPending || stopMutation.isPending}
-                className="w-full h-10 text-base font-medium bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 text-white shadow-lg shadow-cyan-500/20"
-              >
-                {isRunning ? (
-                  <>⏸ 停止爬虫</>
-                ) : (
-                  <>▶ 开始爬虫</>
-                )}
-              </Button>
-            </div>
+            {/* 进度面板 */}
+            <ProgressPanel 
+              progress={status?.progress}
+              isRunning={isRunning}
+              platform={config.platform}
+            />
 
-            {/* 终端日志 */}
-            <div className="pb-3">
-              <TerminalLog />
-            </div>
-          </>
+            {/* 微信平台使用全新的仪表盘布局 */}
+            {config.platform === 'wechat' ? (
+              <WeChatDashboard />
+            ) : (
+              /* 其他平台使用经典三列布局 */
+              <>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
+                  {/* 目标配置 */}
+                  <TargetConfig
+                    crawlerType={config.crawler_type}
+                    keywords={config.keywords || ''}
+                    specifiedIds={config.specified_ids || ''}
+                    creatorIds={config.creator_ids || ''}
+                    startPage={config.start_page || 1}
+                    disabled={isRunning}
+                    onCrawlerTypeChange={handleCrawlerTypeChange}
+                    onKeywordsChange={(value) => updateConfig({ keywords: value })}
+                    onSpecifiedIdsChange={(value) => updateConfig({ specified_ids: value })}
+                    onCreatorIdsChange={(value) => updateConfig({ creator_ids: value })}
+                    onStartPageChange={(value) => updateConfig({ start_page: value })}
+                  />
+
+                  {/* 登录配置 */}
+                  <LoginConfig
+                    platform={config.platform}
+                    loginType={config.login_type}
+                    cookies={config.cookies}
+                    disabled={isRunning}
+                    onLoginTypeChange={handleLoginTypeChange}
+                    onCookiesChange={(value) => updateConfig({ cookies: value })}
+                  />
+
+                  {/* 输出配置 */}
+                  <OutputConfig
+                    platform={config.platform}
+                    saveOption={config.save_option || 'json'}
+                    enableComments={config.enable_comments || false}
+                    enableSubComments={config.enable_sub_comments || false}
+                    headless={config.headless || false}
+                    enableIncremental={config.enable_incremental || false}
+                    incrementalThreshold={config.incremental_early_stop || 3}
+                    crawlerType={config.crawler_type}
+                    disabled={isRunning}
+                    onSaveOptionChange={(value) => updateConfig({ save_option: value })}
+                    onEnableCommentsChange={(value) => updateConfig({ enable_comments: value })}
+                    onEnableSubCommentsChange={(value) => updateConfig({ enable_sub_comments: value })}
+                    onHeadlessChange={(value) => updateConfig({ headless: value })}
+                    onEnableIncrementalChange={(value) => updateConfig({ enable_incremental: value })}
+                    onIncrementalThresholdChange={(value) => updateConfig({ incremental_early_stop: value })}
+                  />
+                </div>
+
+                {/* 启动按钮 */}
+                <div className="mb-3">
+                  <Button
+                    onClick={handleStartStop}
+                    disabled={startMutation.isPending || stopMutation.isPending}
+                    className="w-full h-10 text-base font-medium bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 text-white shadow-lg shadow-cyan-500/20"
+                  >
+                    {isRunning ? (
+                      <>⏸ 停止爬虫</>
+                    ) : (
+                      <>▶ 开始爬虫</>
+                    )}
+                  </Button>
+                </div>
+
+                {/* 终端日志 */}
+                <div className="pb-3">
+                  <TerminalLog />
+                </div>
+              </>
+            )}
+          </div>
         )}
       </main>
 

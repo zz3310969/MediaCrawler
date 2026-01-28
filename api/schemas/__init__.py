@@ -26,7 +26,38 @@ from .crawler import (
     LogEntry,
 )
 
+# Multi-task schemas
+from .task import (
+    TaskStatus,
+    TaskPriority,
+    TaskConfig,
+    TaskProgress,
+    TaskResult,
+    Task,
+    TaskLease,
+    TaskCreateRequest,
+    TaskListRequest,
+    TaskListResponse,
+    TaskStatsResponse,
+)
+
+from .session import (
+    SessionQuota,
+    SessionPreferences,
+    Session,
+    SessionCreateRequest,
+    SessionResponse,
+)
+
+from .event import (
+    EventType,
+    LogLevel,
+    TaskEvent,
+    LogEntry as TaskLogEntry,
+)
+
 __all__ = [
+    # Existing
     "PlatformEnum",
     "LoginTypeEnum",
     "CrawlerTypeEnum",
@@ -34,4 +65,27 @@ __all__ = [
     "CrawlerStartRequest",
     "CrawlerStatusResponse",
     "LogEntry",
+    # Task
+    "TaskStatus",
+    "TaskPriority",
+    "TaskConfig",
+    "TaskProgress",
+    "TaskResult",
+    "Task",
+    "TaskLease",
+    "TaskCreateRequest",
+    "TaskListRequest",
+    "TaskListResponse",
+    "TaskStatsResponse",
+    # Session
+    "SessionQuota",
+    "SessionPreferences",
+    "Session",
+    "SessionCreateRequest",
+    "SessionResponse",
+    # Event
+    "EventType",
+    "LogLevel",
+    "TaskEvent",
+    "TaskLogEntry",
 ]

@@ -1,0 +1,463 @@
+"""
+任务管理器
+"""
+import logging
+from typing import Optional, List
+from datetime import datetime
+
+from api.interfaces.queue import ITaskQueue
+from api.interfaces.storage import ITaskStorage
+from api.interfaces.session import ISessionStore
+from api.interfaces.event import IEventBus
+
+from api.schemas.task import (
+    Task, TaskStatus, TaskCreateRequest, 
+    TaskListRequest, TaskStatsResponse
+)
+from api.schemas.event import TaskEvent, EventType, LogEntry
+
+logger = logging.getLogger(__name__)
+
+
+class TaskManagerError(Exception):
+    """任务管理器错误基类"""
+    pass
+
+
+class QuotaExceededError(TaskManagerError):
+    """配额超限"""
+    pass
+
+
+class TaskNotFoundError(TaskManagerError):
+    """任务不存在"""
+    pass
+
+
+class PermissionDeniedError(TaskManagerError):
+    """权限不足"""
+    pass
+
+
+class DuplicateTaskError(TaskManagerError):
+    """重复任务"""
+    pass
+
+
+class TaskManager:
+    """任务管理器"""
+    
+    def __init__(
+        self,
+        queue: ITaskQueue,
+        storage: ITaskStorage,
+        session_store: ISessionStore,
+        event_bus: IEventBus
+    ):
+        self._queue = queue
+        self._storage = storage
+        self._session_store = session_store
+        self._event_bus = event_bus
+    
+    # ========== 创建任务 ==========
+    
+    async def create_task(
+        self,
+        session_id: str,
+        request: TaskCreateRequest
+    ) -> Task:
+        """
+        创建任务
+        
+        Args:
+            session_id: 会话 ID
+            request: 创建请求
+        
+        Returns:
+            创建的任务
+        
+        Raises:
+            QuotaExceededError: 配额超限
+            DuplicateTaskError: 幂等键重复
+            PermissionDeniedError: 会话无效
+        """
+        # 1. 验证会话
+        session = await self._session_store.get(session_id)
+        if not session:
+            raise PermissionDeniedError("Invalid session")
+        
+        # 2. 幂等键检查
+        if request.idempotency_key:
+            existing = await self._storage.find_by_idempotency_key(
+                session_id, request.idempotency_key
+            )
+            if existing:
+                logger.info(f"Duplicate task with idempotency key: {request.idempotency_key}")
+                return existing
+        
+        # 3. 配额检查：每日任务数
+        if not await self._session_store.increment_daily_tasks(session_id):
+            raise QuotaExceededError("Daily task limit exceeded")
+        
+        # 4. 配额检查：并发任务数
+        running_count = await self._get_running_count(session_id)
+        if running_count >= session.quota.max_concurrent_tasks:
+            raise QuotaExceededError("Concurrent task limit exceeded")
+        
+        # 5. 创建任务对象
+        task = Task(
+            session_id=session_id,
+            task_name=request.task_name,
+            config=request.config,
+            priority=request.priority,
+            scheduled_at=request.scheduled_at,
+            idempotency_key=request.idempotency_key
+        )
+        
+        # 6. 持久化
+        try:
+            await self._storage.create(task)
+        except ValueError as e:
+            raise DuplicateTaskError(str(e))
+        
+        # 7. 入队
+        if request.scheduled_at and request.scheduled_at > datetime.utcnow():
+            # 延迟任务
+            delay = (request.scheduled_at - datetime.utcnow()).total_seconds()
+            await self._queue.enqueue_delayed(task, int(delay))
+        else:
+            await self._queue.enqueue(task, task.priority)
+        
+        # 8. 发布事件
+        await self._event_bus.publish(TaskEvent(
+            event_type=EventType.TASK_CREATED,
+            task_id=task.task_id,
+            session_id=session_id,
+            payload={"task_name": task.task_name, "platform": task.config.platform}
+        ))
+        
+        await self._event_bus.publish(TaskEvent(
+            event_type=EventType.TASK_QUEUED,
+            task_id=task.task_id,
+            session_id=session_id
+        ))
+        
+        logger.info(f"Task created: {task.task_id}")
+        return task
+    
+    async def _get_running_count(self, session_id: str) -> int:
+        """获取用户运行中的任务数"""
+        tasks = await self._storage.get_by_session(
+            session_id, status=TaskStatus.RUNNING
+        )
+        return len(tasks)
+    
+    # ========== 查询任务 ==========
+    
+    async def get_task(self, session_id: str, task_id: str) -> Task:
+        """
+        获取任务详情
+        
+        Raises:
+            TaskNotFoundError: 任务不存在
+            PermissionDeniedError: 无权访问
+        """
+        task = await self._storage.get(task_id)
+        if not task:
+            raise TaskNotFoundError(f"Task not found: {task_id}")
+        
+        if task.session_id != session_id:
+            raise PermissionDeniedError("Permission denied")
+        
+        return task
+    
+    async def get_task_by_id(self, task_id: str) -> Optional[Task]:
+        """
+        获取任务（不检查权限，供内部使用）
+        """
+        return await self._storage.get(task_id)
+    
+    async def list_tasks(
+        self,
+        session_id: str,
+        request: TaskListRequest
+    ) -> List[Task]:
+        """获取任务列表"""
+        offset = (request.page - 1) * request.page_size
+        
+        return await self._storage.get_by_session(
+            session_id,
+            status=request.status,
+            platform=request.platform,
+            limit=request.page_size,
+            offset=offset
+        )
+    
+    async def count_tasks(self, session_id: str) -> int:
+        """获取任务总数"""
+        return await self._storage.count_by_session(session_id)
+    
+    async def get_stats(self, session_id: str) -> TaskStatsResponse:
+        """获取任务统计"""
+        counts = await self._storage.count_by_status(session_id)
+        
+        return TaskStatsResponse(
+            pending=counts.get("pending", 0),
+            running=counts.get("running", 0),
+            completed=counts.get("completed", 0),
+            failed=counts.get("failed", 0),
+            cancelled=counts.get("cancelled", 0),
+            total=sum(counts.values())
+        )
+    
+    # ========== 任务操作 ==========
+    
+    async def cancel_task(self, session_id: str, task_id: str) -> bool:
+        """
+        取消任务
+        
+        - pending 状态：直接移除
+        - running 状态：设置取消标记，由 worker 处理
+        """
+        task = await self.get_task(session_id, task_id)
+        
+        if task.status == TaskStatus.PENDING:
+            # 从队列移除
+            await self._queue.remove(task_id)
+            
+            # 更新状态
+            await self._storage.update(task_id, {
+                "status": TaskStatus.CANCELLED,
+                "finished_at": datetime.utcnow()
+            })
+            
+            # 发布事件
+            await self._event_bus.publish(TaskEvent(
+                event_type=EventType.TASK_CANCELLED,
+                task_id=task_id,
+                session_id=session_id
+            ))
+            
+            logger.info(f"Task {task_id} cancelled (was pending)")
+            return True
+        
+        elif task.status == TaskStatus.RUNNING:
+            # 设置取消标记
+            await self._storage.update(task_id, {
+                "cancel_requested": True
+            })
+            
+            logger.info(f"Task {task_id} cancel requested (was running)")
+            return True
+        
+        else:
+            # 已完成/已失败/已取消，无法取消
+            logger.warning(f"Cannot cancel task {task_id} in status {task.status}")
+            return False
+    
+    async def retry_task(self, session_id: str, task_id: str) -> Task:
+        """
+        重试失败的任务
+        
+        - 创建一个新任务（保留原配置）
+        - 或者将死信任务重新入队
+        """
+        task = await self.get_task(session_id, task_id)
+        
+        if task.status not in (TaskStatus.FAILED, TaskStatus.CANCELLED):
+            raise TaskManagerError("Can only retry failed or cancelled tasks")
+        
+        # 方案1：从死信队列恢复
+        if await self._queue.retry_dead_letter(task_id):
+            await self._storage.update(task_id, {
+                "status": TaskStatus.PENDING,
+                "retry_count": 0,
+                "cancel_requested": False,
+                "result": {}
+            })
+            
+            await self._event_bus.publish(TaskEvent(
+                event_type=EventType.TASK_RETRYING,
+                task_id=task_id,
+                session_id=session_id
+            ))
+            
+            logger.info(f"Task {task_id} retried from dead letter")
+            return await self._storage.get(task_id)
+        
+        # 方案2：创建新任务
+        new_task = Task(
+            session_id=session_id,
+            task_name=f"{task.task_name or 'Task'} (retry)",
+            config=task.config,
+            priority=task.priority
+        )
+        
+        await self._storage.create(new_task)
+        await self._queue.enqueue(new_task, new_task.priority)
+        
+        await self._event_bus.publish(TaskEvent(
+            event_type=EventType.TASK_CREATED,
+            task_id=new_task.task_id,
+            session_id=session_id,
+            payload={"retry_of": task_id}
+        ))
+        
+        logger.info(f"Created retry task {new_task.task_id} for {task_id}")
+        return new_task
+    
+    async def update_priority(
+        self,
+        session_id: str,
+        task_id: str,
+        priority: int
+    ) -> bool:
+        """调整任务优先级"""
+        task = await self.get_task(session_id, task_id)
+        
+        if task.status != TaskStatus.PENDING:
+            return False
+        
+        # 更新队列
+        if await self._queue.reorder(task_id, priority):
+            # 更新存储
+            await self._storage.update(task_id, {"priority": priority})
+            logger.info(f"Task {task_id} priority changed to {priority}")
+            return True
+        
+        return False
+    
+    async def delete_task(self, session_id: str, task_id: str) -> bool:
+        """删除任务"""
+        task = await self.get_task(session_id, task_id)
+        
+        # 只能删除已完成的任务
+        if task.status in (TaskStatus.PENDING, TaskStatus.RUNNING):
+            raise TaskManagerError("Cannot delete pending or running tasks")
+        
+        await self._storage.delete(task_id)
+        logger.info(f"Task {task_id} deleted")
+        return True
+    
+    # ========== 日志操作 ==========
+    
+    async def get_logs(
+        self,
+        session_id: str,
+        task_id: str,
+        limit: int = 100,
+        offset: int = 0,
+        level: Optional[str] = None
+    ) -> List[LogEntry]:
+        """获取任务日志"""
+        # 权限检查
+        await self.get_task(session_id, task_id)
+        
+        return await self._storage.get_logs(
+            task_id, limit=limit, offset=offset, level=level
+        )
+    
+    # ========== 内部方法（Worker 调用） ==========
+    
+    async def update_task_status(
+        self,
+        task_id: str,
+        status: TaskStatus,
+        **kwargs
+    ) -> bool:
+        """
+        更新任务状态（Worker 调用）
+        
+        注：此方法不做 session 权限校验
+        """
+        data = {"status": status, **kwargs}
+        
+        if status == TaskStatus.RUNNING:
+            data["started_at"] = datetime.utcnow()
+        elif status in (TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED):
+            data["finished_at"] = datetime.utcnow()
+        
+        result = await self._storage.update(task_id, data)
+        
+        if result:
+            task = await self._storage.get(task_id)
+            if task:
+                event_type_map = {
+                    TaskStatus.RUNNING: EventType.TASK_STARTED,
+                    TaskStatus.COMPLETED: EventType.TASK_COMPLETED,
+                    TaskStatus.FAILED: EventType.TASK_FAILED,
+                    TaskStatus.CANCELLED: EventType.TASK_CANCELLED,
+                }
+                event_type = event_type_map.get(status)
+                
+                if event_type:
+                    await self._event_bus.publish(TaskEvent(
+                        event_type=event_type,
+                        task_id=task_id,
+                        session_id=task.session_id,
+                        payload=kwargs
+                    ))
+        
+        return result
+    
+    async def update_task_progress(
+        self,
+        task_id: str,
+        current: int,
+        total: int,
+        **extra
+    ) -> bool:
+        """更新任务进度（Worker 调用）"""
+        percentage = int(current / total * 100) if total > 0 else 0
+        
+        result = await self._storage.update(task_id, {
+            "progress": {
+                "current": current,
+                "total": total,
+                "percentage": percentage,
+                **extra
+            },
+            "last_heartbeat_at": datetime.utcnow()
+        })
+        
+        if result:
+            task = await self._storage.get(task_id)
+            if task:
+                await self._event_bus.publish(TaskEvent(
+                    event_type=EventType.TASK_PROGRESS,
+                    task_id=task_id,
+                    session_id=task.session_id,
+                    payload={"current": current, "total": total, "percentage": percentage}
+                ))
+        
+        return result
+    
+    async def append_task_log(
+        self,
+        task_id: str,
+        level: str,
+        message: str,
+        **extra
+    ) -> bool:
+        """追加任务日志（Worker 调用）"""
+        log_entry = LogEntry(
+            task_id=task_id,
+            level=level,
+            message=message,
+            extra=extra
+        )
+        
+        result = await self._storage.append_log(task_id, log_entry)
+        
+        if result:
+            task = await self._storage.get(task_id)
+            if task:
+                await self._event_bus.publish(TaskEvent(
+                    event_type=EventType.TASK_LOG,
+                    task_id=task_id,
+                    session_id=task.session_id,
+                    payload={"level": level, "message": message}
+                ))
+        
+        return result
+

@@ -1,0 +1,97 @@
+# MediaCrawler 多任务配置
+# Multi-Task Configuration
+
+app:
+  name: MediaCrawler
+  version: 2.0.0
+  debug: false
+
+# 组件类型选择
+components:
+  queue: memory          # memory / redis
+  storage: memory        # memory / redis / sqlite
+  session: memory        # memory / redis
+  event_bus: asyncio     # asyncio / redis
+
+# 签名服务配置
+sign_server:
+  enabled: true
+  url: http://localhost:8989
+  timeout: 10
+  retry_count: 3
+
+# 队列配置
+queue:
+  memory:
+    max_size: 1000              # 最大队列长度
+    dead_letter_max: 100        # 死信队列最大长度
+  
+  redis:
+    host: localhost
+    port: 6379
+    db: 0
+    password: ""
+    key_prefix: "mc:queue:"
+  
+  common:
+    default_priority: 5         # 默认优先级 (1-10)
+    max_retries: 3              # 最大重试次数
+    retry_delay: 60             # 重试延迟(秒)
+    task_timeout: 3600          # 任务超时(秒)
+    lease_timeout: 300          # 租约超时(秒)
+
+# Session 配置
+session:
+  expire_hours: 24
+  anonymous_allowed: true
+  max_sessions_per_user: 5
+
+# 并发配置
+concurrency:
+  global_max: 10              # 系统最大并发任务数
+  
+  user:
+    default_max_concurrent: 3   # 默认用户并发数
+    premium_max_concurrent: 5   # 高级用户并发数
+    default_max_daily: 100      # 默认每日任务上限
+    premium_max_daily: 500      # 高级每日任务上限
+  
+  platform:
+    xhs:
+      max_concurrent: 2
+      requests_per_minute: 30
+    dy:
+      max_concurrent: 2
+      requests_per_minute: 20
+    bili:
+      max_concurrent: 3
+      requests_per_minute: 60
+    wb:
+      max_concurrent: 2
+      requests_per_minute: 30
+    wechat:
+      max_concurrent: 3
+      requests_per_minute: 60
+
+# Worker 配置
+worker:
+  id_prefix: "mc-worker"
+  count: 4                    # 每个进程的协程数
+  task_timeout: 3600          # 单任务超时(秒)
+  heartbeat_interval: 60      # 心跳间隔(秒)
+  lease_extend_seconds: 300   # 续租时长(秒)
+
+# 日志配置
+logging:
+  max_logs_per_task: 2000     # 每任务最大日志条数
+  log_retention_days: 7       # 日志保留天数
+  ws_queue_size: 256          # WebSocket 发送队列大小
+
+# Redis 配置 (当使用 Redis 组件时)
+redis:
+  host: localhost
+  port: 6379
+  db: 0
+  password: ""
+  max_connections: 10
+

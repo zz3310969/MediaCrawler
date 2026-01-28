@@ -20,14 +20,19 @@
 MediaCrawler WebUI API Server
 Start command: uvicorn api.main:app --port 8080 --reload
 Or: python -m api.main
+
+环境变量:
+- INTEGRATED_WORKER=1  启用集成 Worker 模式（开发测试用，Worker 与 API 同进程运行）
 """
 import asyncio
 import os
 import sys
 import subprocess
 import uvicorn
+import logging
 from pathlib import Path
 from contextlib import asynccontextmanager
+from typing import Optional, Dict
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -39,15 +44,143 @@ if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
 from .routers import crawler_router, data_router, websocket_router, wechat_router
+from .routers.auth import router as auth_router
+from .routers.tasks import router as tasks_router
+from .routers.ws_tasks import router as ws_tasks_router, setup_event_subscriptions, cleanup_event_subscriptions
+from .middleware.session import SessionMiddleware
+from .services.factory import get_services, get_event_bus
+from .services.task_executor import TaskExecutor, CrawlerFunc, TaskContext
+from .schemas.task import Task
 import config
 from database import db
+
+logger = logging.getLogger(__name__)
+
+# ========== 集成 Worker 爬虫函数 ==========
+# 当 INTEGRATED_WORKER=1 时，这些爬虫在 API 同进程运行
+
+# 检查是否使用真实爬虫
+USE_REAL_CRAWLER = os.environ.get("USE_REAL_CRAWLER", "0") == "1"
+
+
+async def real_crawler(task: Task, ctx: TaskContext) -> None:
+    """
+    真实爬虫 - 通过子进程调用 MediaCrawler
+    支持所有平台: xhs, dy, bili, wb, wechat, ks, tieba, zhihu
+    """
+    from .services.crawler_adapter import run_crawler_task
+    await run_crawler_task(task, ctx)
+
+
+async def mock_crawler(task: Task, ctx: TaskContext, platform_name: str) -> None:
+    """Mock 爬虫 - 用于测试"""
+    await ctx.info(f"Starting {platform_name} crawler (Mock Mode)...")
+    total = task.config.max_notes
+    for i in range(total):
+        ctx.check_cancelled()
+        await ctx.update_progress(i + 1, total, items_crawled=i + 1)
+        await ctx.info(f"[Mock] Crawled item {i + 1}/{total}")
+        await asyncio.sleep(0.1)  # 模拟爬取延迟
+    await ctx.info(f"{platform_name} crawler finished (Mock)")
+
+
+async def xhs_crawler(task: Task, ctx: TaskContext) -> None:
+    """小红书爬虫"""
+    if USE_REAL_CRAWLER:
+        await real_crawler(task, ctx)
+    else:
+        await mock_crawler(task, ctx, "XHS")
+
+
+async def douyin_crawler(task: Task, ctx: TaskContext) -> None:
+    """抖音爬虫"""
+    if USE_REAL_CRAWLER:
+        await real_crawler(task, ctx)
+    else:
+        await mock_crawler(task, ctx, "Douyin")
+
+
+async def bilibili_crawler(task: Task, ctx: TaskContext) -> None:
+    """B站爬虫"""
+    if USE_REAL_CRAWLER:
+        await real_crawler(task, ctx)
+    else:
+        await mock_crawler(task, ctx, "Bilibili")
+
+
+async def weibo_crawler(task: Task, ctx: TaskContext) -> None:
+    """微博爬虫"""
+    if USE_REAL_CRAWLER:
+        await real_crawler(task, ctx)
+    else:
+        await mock_crawler(task, ctx, "Weibo")
+
+
+async def wechat_crawler(task: Task, ctx: TaskContext) -> None:
+    """微信爬虫"""
+    if USE_REAL_CRAWLER:
+        await real_crawler(task, ctx)
+    else:
+        await mock_crawler(task, ctx, "WeChat")
+
+
+async def kuaishou_crawler(task: Task, ctx: TaskContext) -> None:
+    """快手爬虫"""
+    if USE_REAL_CRAWLER:
+        await real_crawler(task, ctx)
+    else:
+        await mock_crawler(task, ctx, "Kuaishou")
+
+
+async def tieba_crawler(task: Task, ctx: TaskContext) -> None:
+    """贴吧爬虫"""
+    if USE_REAL_CRAWLER:
+        await real_crawler(task, ctx)
+    else:
+        await mock_crawler(task, ctx, "Tieba")
+
+
+async def zhihu_crawler(task: Task, ctx: TaskContext) -> None:
+    """知乎爬虫"""
+    if USE_REAL_CRAWLER:
+        await real_crawler(task, ctx)
+    else:
+        await mock_crawler(task, ctx, "Zhihu")
+
+
+INTEGRATED_CRAWLERS: Dict[str, CrawlerFunc] = {
+    "xhs": xhs_crawler,
+    "dy": douyin_crawler,
+    "bili": bilibili_crawler,
+    "wb": weibo_crawler,
+    "wechat": wechat_crawler,
+    "ks": kuaishou_crawler,
+    "tieba": tieba_crawler,
+    "zhihu": zhihu_crawler,
+}
+
+# 全局 executor 引用（用于关闭）
+_integrated_executor: Optional[TaskExecutor] = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """API 服务生命周期管理"""
+    global _integrated_executor
+    
     # 启动时执行
     print("[API] MediaCrawler WebUI API 正在启动...")
+    
+    # 检查是否启用集成 Worker 模式
+    integrated_worker = os.environ.get("INTEGRATED_WORKER", "0") == "1"
+    use_real_crawler = os.environ.get("USE_REAL_CRAWLER", "0") == "1"
+    
+    if integrated_worker:
+        print("[API] 🔧 集成 Worker 模式已启用（开发测试用）")
+        if use_real_crawler:
+            print("[API] 🕷️  真实爬虫模式 - 将调用 MediaCrawler 执行真实爬取")
+        else:
+            print("[API] 🧪 Mock 爬虫模式 - 仅模拟进度（设置 USE_REAL_CRAWLER=1 启用真实爬虫）")
     
     # 解析命令行参数（如果有的话）
     # 这样可以支持 --save_data_option 等参数
@@ -72,12 +205,74 @@ async def lifespan(app: FastAPI):
         else:
             print(f"[API] ✓ 数据库连接验证成功")
     
+    # 初始化多任务服务
+    print("[API] 正在初始化多任务服务...")
+    try:
+        services = get_services()
+        event_bus = services["event_bus"]
+        await event_bus.start()
+        await setup_event_subscriptions()
+        print("[API] ✓ 多任务服务初始化完成")
+    except Exception as e:
+        print(f"[API] ⚠️  多任务服务初始化失败: {e}")
+    
+    # 如果启用集成 Worker 模式，启动 TaskExecutor
+    if integrated_worker:
+        try:
+            print("[API] 正在启动集成 Worker...")
+            
+            # 创建并发控制
+            global_sem = asyncio.Semaphore(10)
+            platform_sems = {
+                "xhs": asyncio.Semaphore(2),
+                "dy": asyncio.Semaphore(2),
+                "bili": asyncio.Semaphore(3),
+                "wb": asyncio.Semaphore(2),
+                "wechat": asyncio.Semaphore(3),
+            }
+            
+            # 创建执行器
+            _integrated_executor = TaskExecutor(
+                worker_id="integrated-worker",
+                queue=services["queue"],
+                storage=services["storage"],
+                event_bus=services["event_bus"],
+                crawlers=INTEGRATED_CRAWLERS,
+                global_semaphore=global_sem,
+                platform_semaphores=platform_sems
+            )
+            
+            # 启动执行器
+            await _integrated_executor.start(worker_count=4)
+            print("[API] ✓ 集成 Worker 已启动 (4 workers)")
+        except Exception as e:
+            print(f"[API] ⚠️  集成 Worker 启动失败: {e}")
+            _integrated_executor = None
+    
     print(f"[API] ✓ API 服务启动完成")
     
     yield
     
     # 关闭时执行
     print("[API] API 服务正在关闭...")
+    
+    # 停止集成 Worker
+    if _integrated_executor is not None:
+        try:
+            print("[API] 正在停止集成 Worker...")
+            await _integrated_executor.stop(graceful_timeout=10)
+            print("[API] ✓ 集成 Worker 已停止")
+        except Exception as e:
+            print(f"[API] ⚠️  集成 Worker 停止失败: {e}")
+    
+    # 清理多任务服务
+    try:
+        await cleanup_event_subscriptions()
+        event_bus = get_event_bus()
+        await event_bus.stop()
+        print("[API] ✓ 多任务服务已关闭")
+    except Exception as e:
+        print(f"[API] ⚠️  多任务服务关闭失败: {e}")
 
 
 app = FastAPI(
@@ -104,11 +299,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Session middleware for multi-task support
+app.add_middleware(SessionMiddleware)
+
 # Register routers
 app.include_router(crawler_router, prefix="/api")
 app.include_router(data_router, prefix="/api")
 app.include_router(websocket_router, prefix="/api")
 app.include_router(wechat_router, prefix="/api")
+
+# Multi-task routers
+app.include_router(auth_router)
+app.include_router(tasks_router)
+app.include_router(ws_tasks_router)
 
 
 @app.get("/")

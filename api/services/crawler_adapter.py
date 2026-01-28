@@ -1,0 +1,429 @@
+"""
+爬虫适配器
+将多任务系统的 Task 转换为 MediaCrawler 可执行的爬虫任务
+支持两种执行模式：
+1. 子进程模式（推荐）：隔离性好，适合生产环境
+2. 进程内模式：共享浏览器，适合开发调试
+"""
+import asyncio
+import os
+import sys
+import json
+import tempfile
+import logging
+from typing import Optional, Dict, Any, Callable, Awaitable
+from datetime import datetime
+from pathlib import Path
+
+from api.schemas.task import Task, TaskConfig
+from api.services.task_executor import TaskContext
+
+logger = logging.getLogger(__name__)
+
+# 项目根目录
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+class CrawlerAdapter:
+    """爬虫适配器 - 将多任务 Task 转换为 MediaCrawler 执行"""
+    
+    # 平台映射
+    PLATFORM_MAP = {
+        "xhs": "xhs",
+        "dy": "dy", 
+        "bili": "bili",
+        "wb": "wb",
+        "wechat": "wechat",
+        "ks": "ks",
+        "tieba": "tieba",
+        "zhihu": "zhihu",
+    }
+    
+    # 爬虫类型映射
+    CRAWLER_TYPE_MAP = {
+        "search": "search",
+        "detail": "detail",
+        "creator": "creator",
+        "creator_vip": "creator_vip",
+        "album": "album",
+    }
+    
+    def __init__(self, task: Task, ctx: TaskContext):
+        self.task = task
+        self.ctx = ctx
+        self.process: Optional[asyncio.subprocess.Process] = None
+    
+    async def run(self) -> Dict[str, Any]:
+        """
+        执行爬虫任务
+        
+        Returns:
+            执行结果 {
+                "success": bool,
+                "items_crawled": int,
+                "error": Optional[str],
+                "output_path": Optional[str]
+            }
+        """
+        await self.ctx.info(f"正在准备爬虫任务: {self.task.config.platform}")
+        
+        # 生成临时配置文件
+        config_path = await self._generate_config_file()
+        
+        try:
+            # 使用子进程执行爬虫
+            result = await self._run_subprocess(config_path)
+            return result
+        finally:
+            # 清理临时配置文件
+            if config_path and os.path.exists(config_path):
+                try:
+                    os.unlink(config_path)
+                except Exception:
+                    pass
+    
+    async def _generate_config_file(self) -> str:
+        """生成临时配置文件"""
+        config = self.task.config
+        
+        # 构建配置内容
+        config_content = self._build_config_content(config)
+        
+        # 写入临时文件
+        fd, config_path = tempfile.mkstemp(suffix=".py", prefix="mc_task_config_")
+        try:
+            with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                f.write(config_content)
+        except Exception:
+            os.close(fd)
+            raise
+        
+        await self.ctx.debug(f"生成配置文件: {config_path}")
+        return config_path
+    
+    def _build_config_content(self, config: TaskConfig) -> str:
+        """构建 Python 配置文件内容"""
+        platform = self.PLATFORM_MAP.get(config.platform, config.platform)
+        crawler_type = self.CRAWLER_TYPE_MAP.get(config.crawler_type, "search")
+        
+        # 如果有 cookies，使用 cookie 登录；否则使用保存的登录状态
+        login_type = "cookie" if config.cookies else (config.login_type or "cookie")
+        
+        # 基础配置
+        lines = [
+            "# -*- coding: utf-8 -*-",
+            "# Auto-generated config for multi-task",
+            f"# Task ID: {self.task.task_id}",
+            f"# Generated at: {datetime.now().isoformat()}",
+            "",
+            f'PLATFORM = "{platform}"',
+            f'CRAWLER_TYPE = "{crawler_type}"',
+            f'LOGIN_TYPE = "{login_type}"',
+            "",
+        ]
+        
+        # 关键词配置
+        keywords = config.keywords or []
+        if keywords:
+            lines.append(f'KEYWORDS = "{",".join(keywords)}"')
+        else:
+            lines.append('KEYWORDS = ""')
+        
+        # 爬取数量配置
+        lines.extend([
+            "",
+            f"CRAWLER_MAX_NOTES_COUNT = {config.max_notes}",
+            f"CRAWLER_MAX_COMMENTS_COUNT_SINGLENOTES = {config.max_comments_per_note}",
+            f"MAX_CONCURRENCY_NUM = {min(config.concurrency, 5)}",
+            f"CRAWLER_MAX_SLEEP_SEC = {config.crawl_interval}",
+            "",
+        ])
+        
+        # 功能开关
+        lines.extend([
+            f"ENABLE_GET_COMMENTS = {config.enable_comments}",
+            f"ENABLE_GET_MEIDAS = {config.enable_media}",
+            "ENABLE_GET_WORDCLOUD = False",
+            "",
+        ])
+        
+        # 数据存储配置
+        save_option = config.save_option or "json"
+        lines.extend([
+            f'SAVE_DATA_OPTION = "{save_option}"',
+            "",
+        ])
+        
+        # Cookie 配置
+        if config.cookies:
+            # 转义引号
+            cookies_escaped = config.cookies.replace('"', '\\"')
+            lines.append(f'COOKIES = "{cookies_escaped}"')
+        else:
+            lines.append('COOKIES = ""')
+        
+        # 平台特定配置
+        if platform == "xhs":
+            creator_ids = config.creator_ids or []
+            note_urls = config.note_urls or []
+            lines.extend([
+                "",
+                f"XHS_CREATOR_ID_LIST = {json.dumps(creator_ids)}",
+                f"XHS_SPECIFIED_NOTE_URL_LIST = {json.dumps(note_urls)}",
+            ])
+        elif platform == "dy":
+            creator_ids = config.creator_ids or []
+            video_urls = config.note_urls or []
+            lines.extend([
+                "",
+                f"DY_CREATOR_ID_LIST = {json.dumps(creator_ids)}",
+                f"DY_SPECIFIED_ID_LIST = {json.dumps(video_urls)}",
+            ])
+        elif platform == "bili":
+            creator_ids = config.creator_ids or []
+            video_urls = config.note_urls or []
+            lines.extend([
+                "",
+                f"BILI_CREATOR_ID_LIST = {json.dumps(creator_ids)}",
+                f"BILI_SPECIFIED_ID_LIST = {json.dumps(video_urls)}",
+            ])
+        elif platform == "wb":
+            creator_ids = config.creator_ids or []
+            note_urls = config.note_urls or []
+            lines.extend([
+                "",
+                f"WEIBO_CREATOR_ID_LIST = {json.dumps(creator_ids)}",
+                f"WEIBO_SPECIFIED_ID_LIST = {json.dumps(note_urls)}",
+            ])
+        
+        # 其他默认配置
+        lines.extend([
+            "",
+            "# Browser settings",
+            "HEADLESS = True",  # 无头模式，适合服务器运行
+            "SAVE_LOGIN_STATE = True",  # 保存登录状态
+            'USER_DATA_DIR = "browser_data/%s"',  # 浏览器数据目录
+            "",
+            "# Proxy settings",
+            "ENABLE_IP_PROXY = False",
+            "IP_PROXY_POOL_COUNT = 2",
+            "",
+            "# Resume crawl settings",
+            "ENABLE_RESUME_CRAWL = False",
+            "",
+            "# Multi-account settings",
+            "ENABLE_MULTI_ACCOUNT = False",
+            "",
+            "# Incremental crawl settings",
+            "ENABLE_INCREMENTAL_CRAWL = False",
+            "",
+            "# CDP settings - 使用标准模式以复用登录状态",
+            "ENABLE_CDP_MODE = False",
+            "CDP_HEADLESS = True",
+            "",
+            "# Sort type",
+            'SORT_TYPE = ""',
+            "START_PAGE = 1",
+        ])
+        
+        return "\n".join(lines)
+    
+    async def _run_subprocess(self, config_path: str) -> Dict[str, Any]:
+        """使用子进程执行爬虫"""
+        await self.ctx.info("启动爬虫子进程...")
+        
+        # 构建命令
+        # 使用 PYTHONPATH 和自定义配置运行
+        env = os.environ.copy()
+        env["PYTHONPATH"] = str(PROJECT_ROOT)
+        env["MC_TASK_CONFIG"] = config_path
+        env["MC_TASK_ID"] = self.task.task_id
+        
+        # 构建执行脚本
+        script = f'''
+import sys
+import os
+sys.path.insert(0, "{PROJECT_ROOT}")
+
+# 加载任务配置覆盖默认配置
+task_config_path = os.environ.get("MC_TASK_CONFIG")
+if task_config_path and os.path.exists(task_config_path):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("task_config", task_config_path)
+    task_config = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(task_config)
+    
+    # 覆盖 config 模块的属性
+    import config
+    for attr in dir(task_config):
+        if not attr.startswith("_"):
+            setattr(config, attr, getattr(task_config, attr))
+
+# 运行爬虫
+import asyncio
+from main import main, async_cleanup
+
+async def run():
+    try:
+        await main()
+    finally:
+        await async_cleanup()
+
+asyncio.run(run())
+'''
+        
+        # 创建子进程
+        self.process = await asyncio.create_subprocess_exec(
+            sys.executable, "-c", script,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+            env=env,
+            cwd=str(PROJECT_ROOT),
+        )
+        
+        items_crawled = 0
+        error_message = None
+        
+        # 读取输出并更新进度
+        try:
+            async for line in self._read_process_output():
+                # 检查取消
+                self.ctx.check_cancelled()
+                
+                # 解析日志行
+                parsed = self._parse_log_line(line)
+                
+                # 记录日志
+                if parsed["level"] == "ERROR":
+                    await self.ctx.error(parsed["message"])
+                    if not error_message:
+                        error_message = parsed["message"]
+                elif parsed["level"] == "WARNING":
+                    await self.ctx.warning(parsed["message"])
+                else:
+                    await self.ctx.info(parsed["message"])
+                
+                # 提取进度信息
+                progress_info = self._extract_progress(line)
+                if progress_info:
+                    items_crawled = progress_info.get("items", items_crawled)
+                    await self.ctx.update_progress(
+                        current=items_crawled,
+                        total=self.task.config.max_notes,
+                        items_crawled=items_crawled
+                    )
+        
+        except asyncio.CancelledError:
+            await self.ctx.warning("任务被取消，正在终止爬虫进程...")
+            await self._terminate_process()
+            raise
+        
+        # 等待进程结束
+        return_code = await self.process.wait()
+        
+        if return_code == 0:
+            await self.ctx.info("爬虫任务执行完成")
+            return {
+                "success": True,
+                "items_crawled": items_crawled,
+                "error": None,
+            }
+        else:
+            error_message = error_message or f"爬虫进程异常退出，返回码: {return_code}"
+            await self.ctx.error(error_message)
+            return {
+                "success": False,
+                "items_crawled": items_crawled,
+                "error": error_message,
+            }
+    
+    async def _read_process_output(self):
+        """异步读取进程输出"""
+        while True:
+            line = await self.process.stdout.readline()
+            if not line:
+                break
+            try:
+                yield line.decode("utf-8", errors="replace").rstrip()
+            except Exception:
+                continue
+    
+    def _parse_log_line(self, line: str) -> Dict[str, str]:
+        """解析日志行"""
+        # 尝试解析标准日志格式
+        # 格式: [时间] [级别] 消息
+        line = line.strip()
+        
+        level = "INFO"
+        message = line
+        
+        if "[ERROR]" in line or "Error" in line:
+            level = "ERROR"
+        elif "[WARNING]" in line or "Warning" in line:
+            level = "WARNING"
+        elif "[DEBUG]" in line:
+            level = "DEBUG"
+        
+        return {"level": level, "message": message}
+    
+    def _extract_progress(self, line: str) -> Optional[Dict[str, int]]:
+        """从日志行提取进度信息"""
+        # 尝试匹配常见的进度模式
+        import re
+        
+        # 模式1: "Crawled item X/Y" 或 "已爬取 X/Y"
+        match = re.search(r"(?:Crawled|爬取|处理)\s*(?:item)?\s*(\d+)\s*/\s*(\d+)", line, re.IGNORECASE)
+        if match:
+            return {"items": int(match.group(1)), "total": int(match.group(2))}
+        
+        # 模式2: "X notes crawled" 或 "已爬取 X 条"
+        match = re.search(r"(\d+)\s*(?:notes?|条|items?)\s*(?:crawled|爬取|完成)", line, re.IGNORECASE)
+        if match:
+            return {"items": int(match.group(1))}
+        
+        # 模式3: Progress saved: X notes
+        match = re.search(r"Progress.*?(\d+)\s*notes", line, re.IGNORECASE)
+        if match:
+            return {"items": int(match.group(1))}
+        
+        return None
+    
+    async def _terminate_process(self):
+        """终止子进程"""
+        if self.process and self.process.returncode is None:
+            try:
+                self.process.terminate()
+                try:
+                    await asyncio.wait_for(self.process.wait(), timeout=5.0)
+                except asyncio.TimeoutError:
+                    self.process.kill()
+                    await self.process.wait()
+            except Exception as e:
+                logger.error(f"终止进程失败: {e}")
+
+
+async def run_crawler_task(task: Task, ctx: TaskContext) -> None:
+    """
+    执行爬虫任务的入口函数
+    
+    Args:
+        task: 任务对象
+        ctx: 任务上下文
+    """
+    adapter = CrawlerAdapter(task, ctx)
+    
+    try:
+        result = await adapter.run()
+        
+        if result["success"]:
+            await ctx.info(f"任务完成，共爬取 {result['items_crawled']} 条数据")
+        else:
+            raise Exception(result["error"] or "爬虫执行失败")
+    
+    except asyncio.CancelledError:
+        await ctx.warning("任务已取消")
+        raise
+    except Exception as e:
+        await ctx.error(f"任务执行失败: {str(e)}")
+        raise
+
