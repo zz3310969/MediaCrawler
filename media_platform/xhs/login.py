@@ -213,12 +213,16 @@ class XiaoHongShuLogin(AbstractLogin):
     async def login_by_cookies(self):
         """login xiaohongshu website by cookies"""
         utils.logger.info("[XiaoHongShuLogin.login_by_cookies] Begin login xiaohongshu by cookie ...")
-        for key, value in utils.convert_str_cookie_to_dict(self.cookie_str).items():
-            if key != "web_session":  # Only set web_session cookie attribute
+        cookie_dict = utils.convert_str_cookie_to_dict(self.cookie_str)
+        for key, value in cookie_dict.items():
+            if not key:
                 continue
-            await self.browser_context.add_cookies([{
-                'name': key,
-                'value': value,
-                'domain': ".xiaohongshu.com",
-                'path': "/"
-            }])
+            try:
+                await self.browser_context.add_cookies([{
+                    'name': key,
+                    'value': value,
+                    'domain': ".xiaohongshu.com",
+                    'path': "/"
+                }])
+            except Exception as e:
+                utils.logger.warning(f"[XiaoHongShuLogin.login_by_cookies] Add cookie {key} failed: {e}")

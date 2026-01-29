@@ -15,7 +15,7 @@ export default defineConfig({
     proxy: {
       // 开发模式：代理 API 和 WebSocket 请求到后端
       '/api': {
-        target: 'http://localhost:8080',
+        target: 'http://127.0.0.1:8080',
         changeOrigin: true,
         ws: true,  // 支持 WebSocket
       },

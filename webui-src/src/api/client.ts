@@ -1,9 +1,11 @@
 // API 客户端配置
 import axios from 'axios'
+import { getStoredSessionId } from './tasks'
 
 export const client = axios.create({
-  baseURL: import.meta.env.DEV ? 'http://localhost:8080' : '',
+  baseURL: import.meta.env.DEV ? 'http://127.0.0.1:8080' : '',
   timeout: 30000,
+  withCredentials: true,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -12,6 +14,10 @@ export const client = axios.create({
 // 请求拦截器
 client.interceptors.request.use(
   (config) => {
+    const sessionId = getStoredSessionId()
+    if (sessionId) {
+      config.headers['X-Session-ID'] = sessionId
+    }
     return config
   },
   (error) => {

@@ -23,3 +23,17 @@
 # @Time    : 2023/12/2 14:37
 # @Desc    : IP proxy pool entry point
 from .base_proxy import *
+from .types import (
+    ProxyProtocol,
+    ProviderNameEnum,
+    ProxySource,
+    ProxyStatus,
+    BindingStatus,
+    IpInfoModel,
+    ProxyRegionInfo,
+    AccountProxyBinding,
+    ProxyQualityMetrics,
+    ProxyUsageRecord,
+    ProxyDailyStats,
+    PersistedProxy,
+)

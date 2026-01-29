@@ -40,6 +40,8 @@ export function useWebSocket({
   }, [onMessage, onOpen, onClose, onError])
 
   useEffect(() => {
+    let connectTimer: NodeJS.Timeout | undefined;
+
     const connect = () => {
       // 避免重复连接
       if (wsRef.current?.readyState === WebSocket.OPEN || 
@@ -49,7 +51,7 @@ export function useWebSocket({
 
       try {
         const wsUrl = import.meta.env.DEV 
-          ? `ws://localhost:8080${url}` 
+          ? `ws://127.0.0.1:8080${url}` 
           : `ws://${window.location.host}${url}`
         
         console.log('正在连接 WebSocket:', wsUrl)
@@ -72,7 +74,7 @@ export function useWebSocket({
           
           try {
             const data = JSON.parse(event.data)
-            console.log('收到日志:', data)
+            // console.log('收到日志:', data) // 减少日志噪音
             setLastMessage(data)
             onMessageRef.current?.(data)
           } catch (error) {
@@ -96,8 +98,11 @@ export function useWebSocket({
         }
         
         ws.onerror = (error) => {
-          console.error('WebSocket 错误:', error)
-          onErrorRef.current?.(error)
+          // 忽略连接关闭时的错误
+          if (ws.readyState !== WebSocket.CLOSED && ws.readyState !== WebSocket.CLOSING) {
+            console.error('WebSocket 错误:', error)
+            onErrorRef.current?.(error)
+          }
         }
         
         wsRef.current = ws
@@ -106,16 +111,32 @@ export function useWebSocket({
       }
     }
 
-    connect()
+    // 使用短暂延迟来处理 React Strict Mode 的 double-invoke 问题
+    // 如果组件被快速卸载（Strict Mode Check），定时器会被清除，不会发起连接
+    connectTimer = setTimeout(() => {
+      connect()
+    }, 100)
 
     // 清理函数
     return () => {
-      console.log('清理 WebSocket 连接')
+      // 清除挂起的连接请求
+      if (connectTimer) {
+        clearTimeout(connectTimer)
+      }
+      
       if (reconnectTimerRef.current) {
         clearTimeout(reconnectTimerRef.current)
         reconnectTimerRef.current = undefined
       }
+
       if (wsRef.current) {
+        console.log('清理 WebSocket 连接')
+        // 移除所有事件监听器，防止关闭时触发回调
+        wsRef.current.onopen = null
+        wsRef.current.onclose = null
+        wsRef.current.onerror = null
+        wsRef.current.onmessage = null
+        
         wsRef.current.close()
         wsRef.current = null
       }

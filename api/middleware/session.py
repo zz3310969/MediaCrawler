@@ -56,10 +56,15 @@ class SessionMiddleware(BaseHTTPMiddleware):
         "/api/db/",           # 数据库检查 API
         "/api/ws/",           # 原有 WebSocket API
         "/api/wechat/",       # 微信相关 API
+        "/api/proxy/",        # 代理管理 API
     ]
     
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
+        
+        # 跳过 OPTIONS 请求（CORS 预检）
+        if request.method == "OPTIONS":
+            return await call_next(request)
         
         # 检查是否需要跳过验证
         if self._should_skip(path):

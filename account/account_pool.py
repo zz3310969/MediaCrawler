@@ -9,11 +9,15 @@ import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 import aiofiles
 
 from tools import utils
+
+if TYPE_CHECKING:
+    from proxy.binding import AccountProxyBindingManager
+    from proxy.types import IpInfoModel
 
 
 class AccountStatus(Enum):
@@ -23,6 +27,14 @@ class AccountStatus(Enum):
     BANNED = "banned"           # 被封禁
     INVALID = "invalid"         # 登录失效
     UNUSED = "unused"           # 未使用/未登录
+
+
+class ProxyBindingMode(Enum):
+    """代理绑定模式"""
+    AUTO = "auto"               # 自动分配
+    MANUAL = "manual"           # 手动指定
+    INHERIT = "inherit"         # 继承上次绑定
+    NONE = "none"               # 不使用代理
 
 
 @dataclass
@@ -44,6 +56,11 @@ class Account:
     proxy_port: int = 0                     # 代理端口
     proxy_user: str = ""                    # 代理用户名
     proxy_password: str = ""                # 代理密码
+    
+    # 代理绑定增强字段
+    bound_proxy_id: Optional[str] = None    # 绑定的代理ID（来自绑定管理器）
+    proxy_binding_mode: str = ProxyBindingMode.AUTO.value  # 代理绑定模式
+    proxy_sticky: bool = True               # 是否粘性绑定（保持同一代理）
     
     # 状态信息
     status: str = AccountStatus.UNUSED.value  # 账号状态
@@ -150,6 +167,31 @@ class Account:
         if self.proxy_password:
             proxy["password"] = self.proxy_password
         return proxy
+    
+    def update_proxy_from_ip_info(self, ip_info: "IpInfoModel") -> None:
+        """
+        从IpInfoModel更新代理配置
+        
+        Args:
+            ip_info: 代理信息模型
+        """
+        self.proxy_ip = ip_info.ip
+        self.proxy_port = ip_info.port
+        self.proxy_user = ip_info.user
+        self.proxy_password = ip_info.password
+        self.bound_proxy_id = ip_info.proxy_id
+    
+    def clear_proxy(self) -> None:
+        """清除代理配置"""
+        self.proxy_ip = ""
+        self.proxy_port = 0
+        self.proxy_user = ""
+        self.proxy_password = ""
+        self.bound_proxy_id = None
+    
+    def has_bound_proxy(self) -> bool:
+        """检查是否已绑定代理"""
+        return self.bound_proxy_id is not None or (self.proxy_ip and self.proxy_port > 0)
 
 
 class AccountPool:
@@ -159,7 +201,8 @@ class AccountPool:
         self,
         platform: str,
         accounts_dir: str = "./accounts",
-        rotation_strategy: str = "round_robin"  # round_robin | random | least_used
+        rotation_strategy: str = "round_robin",  # round_robin | random | least_used
+        binding_manager: Optional["AccountProxyBindingManager"] = None,
     ):
         self.platform = platform
         self.accounts_dir = accounts_dir
@@ -167,7 +210,12 @@ class AccountPool:
         self.accounts: List[Account] = []
         self.current_index: int = 0
         self._lock = asyncio.Lock()
+        self._binding_manager = binding_manager
         self._ensure_dir_exists()
+    
+    def set_binding_manager(self, manager: "AccountProxyBindingManager") -> None:
+        """设置代理绑定管理器"""
+        self._binding_manager = manager
     
     def _ensure_dir_exists(self) -> None:
         """确保账号目录存在"""
@@ -270,6 +318,106 @@ class AccountPool:
             utils.logger.info(f"[AccountPool] Selected account: {account.account_id}")
             return account
     
+    async def get_next_account_with_proxy(
+        self,
+        auto_bind_proxy: bool = True,
+    ) -> Optional[Account]:
+        """
+        获取下一个可用账号，并自动绑定代理
+        
+        Args:
+            auto_bind_proxy: 是否自动绑定代理
+            
+        Returns:
+            带有代理信息的账号
+        """
+        account = await self.get_next_account()
+        if not account:
+            return None
+        
+        # 如果没有绑定管理器或不需要自动绑定，直接返回
+        if not self._binding_manager or not auto_bind_proxy:
+            return account
+        
+        # 检查绑定模式
+        if account.proxy_binding_mode == ProxyBindingMode.NONE.value:
+            return account
+        
+        # 获取或创建代理绑定
+        try:
+            ip_info = await self._binding_manager.get_proxy_for_account(
+                account_id=account.account_id,
+                platform=self.platform,
+                auto_bind=True,
+                auto_rebind=True,
+            )
+            
+            if ip_info:
+                account.update_proxy_from_ip_info(ip_info)
+                utils.logger.info(
+                    f"[AccountPool] Account {account.account_id} bound to proxy {ip_info.ip}:{ip_info.port}"
+                )
+        except Exception as e:
+            utils.logger.warning(f"[AccountPool] Failed to bind proxy for account {account.account_id}: {e}")
+        
+        return account
+    
+    async def report_proxy_success(self, account_id: str) -> None:
+        """报告代理请求成功"""
+        account = self.get_account_by_id(account_id)
+        if account:
+            account.mark_success()
+            # 后续可以在这里更新代理质量指标
+    
+    async def report_proxy_failure(
+        self,
+        account_id: str,
+        error: str = "",
+        should_rebind: bool = False,
+    ) -> Optional[Account]:
+        """
+        报告代理请求失败
+        
+        Args:
+            account_id: 账号ID
+            error: 错误信息
+            should_rebind: 是否需要重新绑定代理
+            
+        Returns:
+            如果重新绑定，返回更新后的账号
+        """
+        account = self.get_account_by_id(account_id)
+        if not account:
+            return None
+        
+        account.mark_failed(error)
+        
+        # 如果需要重新绑定代理
+        if should_rebind and self._binding_manager and account.bound_proxy_id:
+            try:
+                new_binding = await self._binding_manager.rebind(
+                    account_id=account.account_id,
+                    platform=self.platform,
+                    reason=f"代理失败: {error}",
+                    exclude_proxy_ids=[account.bound_proxy_id] if account.bound_proxy_id else None,
+                )
+                
+                if new_binding:
+                    ip_info = await self._binding_manager.get_proxy_for_account(
+                        account_id=account.account_id,
+                        platform=self.platform,
+                    )
+                    if ip_info:
+                        account.update_proxy_from_ip_info(ip_info)
+                        utils.logger.info(
+                            f"[AccountPool] Account {account_id} rebound to new proxy {ip_info.ip}:{ip_info.port}"
+                        )
+            except Exception as e:
+                utils.logger.error(f"[AccountPool] Failed to rebind proxy: {e}")
+        
+        await self.save_accounts()
+        return account
+    
     async def report_success(self, account_id: str) -> None:
         """报告请求成功"""
         account = self.get_account_by_id(account_id)
@@ -334,7 +482,8 @@ class AccountPool:
 async def create_account_pool(
     platform: str,
     accounts_dir: str = "./accounts",
-    rotation_strategy: str = "round_robin"
+    rotation_strategy: str = "round_robin",
+    binding_manager: Optional["AccountProxyBindingManager"] = None,
 ) -> AccountPool:
     """
     创建并初始化账号池
@@ -343,6 +492,7 @@ async def create_account_pool(
         platform: 平台名称 (xhs, dy, wb, etc.)
         accounts_dir: 账号配置目录
         rotation_strategy: 轮换策略 (round_robin | random | least_used)
+        binding_manager: 代理绑定管理器（可选）
     
     Returns:
         AccountPool: 初始化好的账号池实例
@@ -350,7 +500,8 @@ async def create_account_pool(
     pool = AccountPool(
         platform=platform,
         accounts_dir=accounts_dir,
-        rotation_strategy=rotation_strategy
+        rotation_strategy=rotation_strategy,
+        binding_manager=binding_manager,
     )
     await pool.load_accounts()
     return pool

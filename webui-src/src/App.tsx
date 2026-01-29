@@ -23,6 +23,10 @@ import { TaskCreate } from './components/TaskCreate'
 import { useSession } from './hooks/useSession'
 import { Task } from './types/task'
 
+// Proxy management
+import { ProxyManager } from './components/ProxyManager'
+import { Globe } from 'lucide-react'
+
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
@@ -114,7 +118,8 @@ function MultiTaskView() {
 
 function MainApp() {
   const queryClient = useQueryClient()
-  const [mode, setMode] = useState<'classic' | 'multitask'>('classic')
+  const { loading: sessionLoading } = useSession() // Ensure session is initialized
+  const [mode, setMode] = useState<'classic' | 'multitask' | 'proxy'>('classic')
   
   // Classic mode hooks
   const { config, updateConfig, handleCrawlerTypeChange, handleLoginTypeChange } = useCrawlerConfig()
@@ -210,6 +215,17 @@ function MainApp() {
               >
                 多任务 Pro
               </button>
+              <button 
+                onClick={() => setMode('proxy')} 
+                className={`px-3 py-1 text-xs rounded-md transition-all flex items-center gap-1 ${
+                  mode === 'proxy' 
+                    ? 'bg-white dark:bg-slate-700 shadow-sm font-medium text-slate-900 dark:text-white' 
+                    : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+                }`}
+              >
+                <Globe className="h-3 w-3" />
+                代理管理
+              </button>
             </div>
           </div>
           
@@ -232,7 +248,20 @@ function MainApp() {
 
       {/* 主内容区 */}
       <main className="flex-1 container mx-auto px-6 py-3 overflow-hidden flex flex-col">
-        {mode === 'multitask' ? (
+        {mode === 'proxy' ? (
+          sessionLoading ? (
+            <div className="flex items-center justify-center h-full text-slate-500">
+              <div className="flex flex-col items-center gap-2">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-slate-500"></div>
+                <span>初始化会话...</span>
+              </div>
+            </div>
+          ) : (
+            <div className="flex-1 overflow-y-auto">
+              <ProxyManager />
+            </div>
+          )
+        ) : mode === 'multitask' ? (
           <MultiTaskView />
         ) : (
           /* 经典模式内容 */

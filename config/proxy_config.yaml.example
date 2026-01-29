@@ -1,0 +1,132 @@
+# MediaCrawler 代理系统配置示例
+# 复制此文件为 proxy_config.yaml 并根据需要修改
+
+# 全局设置
+global:
+  enable_proxy: true                    # 是否启用代理
+  proxy_pool_size: 5                    # 代理池大小
+  validate_on_get: true                 # 获取代理时是否验证
+  validate_timeout: 10                  # 验证超时时间（秒）
+  
+  # 账号绑定设置
+  enable_binding: true                  # 启用账号-代理绑定
+  binding_sticky: true                  # 粘性绑定
+  auto_rebind: true                     # 自动重绑定
+  max_bindings_per_proxy: 5             # 每个代理最大绑定数
+  prefer_similar_region: true           # 重绑时优先相似地区
+
+# 持久化设置
+persistence:
+  backend: sqlite                       # 存储后端: sqlite | json
+  database_path: data/proxy.db          # SQLite数据库路径
+  json_data_dir: data/proxy             # JSON存储目录
+
+# 代理来源配置
+sources:
+  # 快代理
+  kuaidaili:
+    enabled: false
+    priority: 1
+    api_url: https://dps.kdlapi.com/api/getdps/
+    api_key: ${KUAIDAILI_API_KEY}       # 从环境变量读取
+    secret_id: ${KUAIDAILI_SECRET_ID}
+    signature: ${KUAIDAILI_SIGNATURE}
+    default_num: 5
+    
+  # 万豆代理
+  wandou:
+    enabled: false
+    priority: 2
+    app_key: ${WANDOU_APP_KEY}
+    
+  # 本地文件代理
+  local_file:
+    enabled: true
+    priority: 3
+    file_path: config/proxies.txt       # 代理列表文件
+    auto_reload: true                   # 自动重载文件变化
+    default_protocol: http
+    default_expired_seconds: null       # null表示永不过期
+    
+  # 自定义API
+  custom_apis:
+    - name: my_proxy_api
+      enabled: false
+      priority: 4
+      url: https://api.example.com/proxy/get
+      method: GET
+      headers:
+        Authorization: Bearer ${MY_PROXY_API_TOKEN}
+      params:
+        count: "{num}"
+        format: json
+      response_type: json
+      data_path: data.list
+      field_mapping:
+        ip: ip
+        port: port
+        protocol: type
+        user: username
+        password: password
+        expired_time: expire_time
+      rate_limit_per_minute: 30
+      min_interval_seconds: 2
+
+# 质量评估设置
+quality:
+  enabled: true
+  sample_window: 100                    # 保留最近N个样本
+  time_window_hours: 24                 # 统计时间窗口
+  
+  # 淘汰阈值
+  min_quality_score: 30                 # 最低质量分
+  min_requests_for_retire: 20           # 淘汰所需最小请求数
+  max_consecutive_failures: 10          # 最大连续失败次数
+  
+  # 自动淘汰
+  auto_retire:
+    enabled: true
+    check_interval_seconds: 300         # 检查间隔（5分钟）
+
+# 故障转移设置
+failover:
+  enabled: true
+  strategy: circuit_breaker             # 策略: simple | sticky | weighted | circuit_breaker
+  max_retries: 3
+  retry_delay_seconds: 1.0
+  
+  # 熔断器设置 (strategy: circuit_breaker)
+  circuit_breaker:
+    failure_threshold: 5                # 触发熔断的连续失败次数
+    recovery_timeout_seconds: 60        # 熔断恢复时间
+    half_open_max_calls: 3              # 半开状态最大测试调用数
+  
+  # 粘性策略设置 (strategy: sticky)
+  sticky:
+    failure_threshold: 3
+    recovery_time_seconds: 300
+
+# 使用统计设置
+statistics:
+  enabled: true
+  collection_interval_seconds: 60       # 收集间隔
+  retention_days: 30                    # 数据保留天数
+  
+  # 日志详情
+  log_requests: true                    # 记录每个请求
+  log_response_samples: true            # 记录响应样本
+  max_samples_per_proxy: 100            # 每个代理最大样本数
+
+# 协议支持
+protocols:
+  http:
+    enabled: true
+    validate_url: http://httpbin.org/ip
+  https:
+    enabled: true
+    validate_url: https://httpbin.org/ip
+  socks5:
+    enabled: true
+    test_host: www.google.com
+    test_port: 80
+

@@ -47,6 +47,7 @@ from .routers import crawler_router, data_router, websocket_router, wechat_route
 from .routers.auth import router as auth_router
 from .routers.tasks import router as tasks_router
 from .routers.ws_tasks import router as ws_tasks_router, setup_event_subscriptions, cleanup_event_subscriptions
+from .routers.proxy import router as proxy_router
 from .middleware.session import SessionMiddleware
 from .services.factory import get_services, get_event_bus
 from .services.task_executor import TaskExecutor, CrawlerFunc, TaskContext
@@ -312,6 +313,9 @@ app.include_router(wechat_router, prefix="/api")
 app.include_router(auth_router)
 app.include_router(tasks_router)
 app.include_router(ws_tasks_router)
+
+# Proxy management router
+app.include_router(proxy_router, prefix="/api")
 
 
 @app.get("/")

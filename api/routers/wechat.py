@@ -790,6 +790,8 @@ def generate_final_html(title: str, page_content: str, body_class: str, css_link
 async def get_accounts():
     """
     获取所有已采集的公众号列表（包括仅配置但未采集的）
+    
+    注意：此接口需要数据库存储支持（db/sqlite/postgres）
     """
     try:
         from database.db_session import get_session
@@ -797,6 +799,12 @@ async def get_accounts():
         from sqlalchemy import select, func, distinct, desc
         
         async with get_session() as session:
+            if session is None:
+                raise HTTPException(
+                    status_code=400, 
+                    detail="数据库未配置。获取公众号列表功能需要数据库存储支持，"
+                           "请将 SAVE_DATA_OPTION 设置为 db、sqlite 或 postgres"
+                )
             # 1. 获取 WeChatAccount 表中的所有账号
             account_query = select(WeChatAccount).order_by(WeChatAccount.add_ts.desc())
             account_result = await session.execute(account_query)
@@ -1200,6 +1208,9 @@ async def get_articles(
 ):
     """
     获取微信文章列表（分页）
+    
+    注意：此接口需要数据库存储支持（db/sqlite/postgres），
+    如果 SAVE_DATA_OPTION 设置为 json/csv，将返回错误。
     """
     try:
         from database.db_session import get_session
@@ -1207,6 +1218,12 @@ async def get_articles(
         from sqlalchemy import select, func, desc, asc
         
         async with get_session() as session:
+            if session is None:
+                raise HTTPException(
+                    status_code=400, 
+                    detail="数据库未配置。微信文章列表功能需要数据库存储支持，"
+                           "请将 SAVE_DATA_OPTION 设置为 db、sqlite 或 postgres"
+                )
             # 构建基础查询
             query = select(WeChatArticle)
             count_query = select(func.count(WeChatArticle.id))
@@ -1294,6 +1311,8 @@ async def get_articles(
 async def get_stats():
     """
     获取微信数据统计
+    
+    注意：此接口需要数据库存储支持（db/sqlite/postgres）
     """
     try:
         from database.db_session import get_session
@@ -1301,6 +1320,12 @@ async def get_stats():
         from sqlalchemy import select, func, distinct
         
         async with get_session() as session:
+            if session is None:
+                raise HTTPException(
+                    status_code=400, 
+                    detail="数据库未配置。统计功能需要数据库存储支持，"
+                           "请将 SAVE_DATA_OPTION 设置为 db、sqlite 或 postgres"
+                )
             # 文章总数
             total_articles_result = await session.execute(
                 select(func.count(WeChatArticle.id))
@@ -1363,6 +1388,8 @@ async def get_top_articles(
 ):
     """
     获取热门文章 Top N（按阅读量排序）
+    
+    注意：此接口需要数据库存储支持（db/sqlite/postgres）
     """
     try:
         from database.db_session import get_session
@@ -1370,6 +1397,12 @@ async def get_top_articles(
         from sqlalchemy import select, desc
         
         async with get_session() as session:
+            if session is None:
+                raise HTTPException(
+                    status_code=400, 
+                    detail="数据库未配置。热门文章功能需要数据库存储支持，"
+                           "请将 SAVE_DATA_OPTION 设置为 db、sqlite 或 postgres"
+                )
             query = select(WeChatArticle).order_by(desc(WeChatArticle.read_num)).limit(limit)
             result = await session.execute(query)
             articles = result.scalars().all()

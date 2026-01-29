@@ -25,3 +25,10 @@
 from .jishu_http_proxy import new_jisu_http_proxy
 from .kuaidl_proxy import new_kuai_daili_proxy
 from .wandou_http_proxy import new_wandou_http_proxy
+from .local_file_proxy import LocalFileProxy, new_local_file_proxy
+from .custom_api_proxy import (
+    CustomApiProxy,
+    CustomApiConfig,
+    new_custom_api_proxy,
+    load_custom_api_config,
+)
