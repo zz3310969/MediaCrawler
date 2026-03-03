@@ -1,6 +1,6 @@
 import { Settings, FileText, Shield } from 'lucide-react';
 import { Platform, TaskConfig } from '../../types';
-import { PLATFORMS, CRAWL_MODE_OPTIONS } from '../../lib/constants';
+import { PLATFORMS, CRAWL_MODE_OPTIONS, PLATFORM_FIELDS } from '../../lib/constants';
 
 interface ProxyConfig {
   use_proxy: boolean;
@@ -15,14 +15,45 @@ interface Step4ConfirmProps {
   onEdit: (step: number) => void;
 }
 
+function getPlatformExtraSummary(platform: Platform | null, config: Partial<TaskConfig>): { label: string; value: string }[] {
+  if (!platform) return [];
+  const items: { label: string; value: string }[] = [];
+  const crawlerType = config.crawler_type || 'search';
+  const fields = (PLATFORM_FIELDS[platform] || []).filter(
+    (f) => !f.showWhen || f.showWhen.includes(crawlerType)
+  );
+
+  for (const field of fields) {
+    const val = (config as Record<string, unknown>)[field.key];
+    if (val === undefined || val === null || val === '') continue;
+
+    if (field.type === 'textarea') {
+      const list = Array.isArray(val) ? val as string[] : (val as string).split('\n').filter(Boolean);
+      if (list.length > 0) {
+        items.push({ label: field.label, value: `${list.length} 项` });
+      }
+    } else if (field.type === 'select' && field.options) {
+      const opt = field.options.find((o) => o.value === String(val));
+      items.push({ label: field.label, value: opt?.label || String(val) });
+    } else if (field.type === 'switch') {
+      items.push({ label: field.label, value: val ? '已开启' : '已关闭' });
+    } else {
+      items.push({ label: field.label, value: String(val) });
+    }
+  }
+  return items;
+}
+
 export function Step4Confirm({ platform, config, proxyConfig, onEdit }: Step4ConfirmProps) {
   const platformInfo = PLATFORMS.find((p) => p.id === platform);
   const crawlModeLabel = CRAWL_MODE_OPTIONS.find((o) => o.value === config.crawler_type)?.label;
-  const keywordsStr = config.keywords?.join(', ') || '-';
-  
+
   const dataOptions = [];
   if (config.enable_comments) dataOptions.push('评论');
   if (config.enable_media) dataOptions.push('媒体文件');
+
+  const crawlerType = config.crawler_type || 'search';
+  const platformExtras = getPlatformExtraSummary(platform, config);
 
   return (
     <div className="space-y-8">
@@ -62,9 +93,20 @@ export function Step4Confirm({ platform, config, proxyConfig, onEdit }: Step4Con
         >
           <div className="space-y-3">
             <SummaryItem label="采集模式" value={crawlModeLabel || '-'} />
-            <SummaryItem label="关键词" value={keywordsStr} />
+            {crawlerType === 'search' && (
+              <SummaryItem label="关键词" value={config.keywords?.join(', ') || '-'} />
+            )}
+            {crawlerType === 'detail' && (
+              <SummaryItem label="指定内容" value={`${config.note_urls?.length || 0} 项`} />
+            )}
+            {(crawlerType === 'creator') && (
+              <SummaryItem label="创作者" value={`${config.creator_ids?.length || 0} 个`} />
+            )}
             <SummaryItem label="采集数量" value={config.max_notes?.toString() || '100'} />
             <SummaryItem label="数据选项" value={dataOptions.length > 0 ? dataOptions.join('、') : '仅基础数据'} />
+            {platformExtras.map((item) => (
+              <SummaryItem key={item.label} label={item.label} value={item.value} />
+            ))}
           </div>
         </SummaryCard>
 

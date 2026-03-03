@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Bug, Play } from 'lucide-react';
+import { ArrowLeft, Bug, Play } from 'lucide-react';
 import { Button } from '../components/common';
 import {
   StepsSidebar,
@@ -92,11 +92,29 @@ export function TaskCreate() {
     }
 
     try {
-      // 构建任务配置
+      // 收集平台特有参数到 extra
+      const extra: Record<string, unknown> = {};
+      const platformExtraKeys = [
+        'sort_type', 'publish_time_type',
+        'bili_search_mode', 'bili_qn',
+        'weibo_search_type', 'enable_full_text',
+        'vip_creator_ids',
+        'wechat_album_ids', 'wechat_enable_content', 'wechat_enable_reading_stats',
+        'tieba_name_list',
+      ];
+      for (const key of platformExtraKeys) {
+        const val = (config as Record<string, unknown>)[key];
+        if (val !== undefined && val !== '' && val !== null) {
+          extra[key] = val;
+        }
+      }
+
       const taskConfig = {
         platform: selectedPlatform,
         crawler_type: config.crawler_type || 'search',
         keywords: config.keywords || [],
+        creator_ids: config.creator_ids || [],
+        note_urls: config.note_urls || [],
         max_notes: config.max_notes || 100,
         enable_comments: config.enable_comments || false,
         enable_media: config.enable_media || false,
@@ -106,9 +124,9 @@ export function TaskCreate() {
         save_option: (config.save_option || 'json') as 'csv' | 'json' | 'excel' | 'db' | 'sqlite',
         enable_anti_detect: antiDetectEnabled,
         anti_detect_config: antiDetectEnabled ? antiDetectConfig : undefined,
+        extra: Object.keys(extra).length > 0 ? extra : undefined,
       };
 
-      // 构建任务创建请求
       const taskRequest = {
         config: taskConfig,
       };
@@ -132,8 +150,27 @@ export function TaskCreate() {
     switch (currentStep) {
       case 1:
         return selectedPlatform !== null;
-      case 2:
-        return config.crawler_type && config.max_notes;
+      case 2: {
+        if (!config.crawler_type || !config.max_notes) return false;
+        const type = config.crawler_type;
+        if (type === 'search') {
+          return (config.keywords && config.keywords.length > 0) ||
+            (selectedPlatform === 'tieba' && config.tieba_name_list);
+        }
+        if (type === 'detail') {
+          return config.note_urls && config.note_urls.length > 0;
+        }
+        if (type === 'creator') {
+          return config.creator_ids && config.creator_ids.length > 0;
+        }
+        if (type === 'creator_vip') {
+          return config.vip_creator_ids && config.vip_creator_ids.length > 0;
+        }
+        if (type === 'album') {
+          return !!config.wechat_album_ids;
+        }
+        return true;
+      }
       case 3:
         return true;
       case 4:
@@ -180,15 +217,25 @@ export function TaskCreate() {
 
       {/* 右侧主内容 */}
       <main className="flex-1 flex flex-col overflow-hidden">
-        <div className="flex-1 overflow-y-auto p-12 pb-24">
+        {/* 顶部栏 */}
+        <div className="flex-shrink-0 flex items-center justify-end px-12 pt-6">
+          <button
+            onClick={() => navigate('/')}
+            className="flex items-center gap-2 px-4 py-2 text-sm text-text-secondary hover:text-text-primary rounded-lg hover:bg-slate-100 transition-colors"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            返回首页
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-12 pt-4 pb-24">
           {currentStep === 1 && (
             <Step1Platform
               selectedPlatform={selectedPlatform}
               onSelect={setSelectedPlatform}
             />
           )}
-          {currentStep === 2 && (
-            <Step2Config config={config} onChange={handleConfigChange} />
+          {currentStep === 2 && selectedPlatform && (
+            <Step2Config platform={selectedPlatform} config={config} onChange={handleConfigChange} />
           )}
           {currentStep === 3 && (
             <Step3AntiDetect

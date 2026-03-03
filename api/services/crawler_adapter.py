@@ -186,38 +186,105 @@ class CrawlerAdapter:
         else:
             lines.append('COOKIES = ""')
         
+        # 从 extra 字段提取平台特有参数
+        extra = config.extra or {}
+
         # 平台特定配置
         if platform == "xhs":
             creator_ids = config.creator_ids or []
             note_urls = config.note_urls or []
+            sort_type = extra.get("sort_type", "general")
             lines.extend([
                 "",
+                f'SORT_TYPE = "{sort_type}"',
                 f"XHS_CREATOR_ID_LIST = {json.dumps(creator_ids)}",
                 f"XHS_SPECIFIED_NOTE_URL_LIST = {json.dumps(note_urls)}",
             ])
         elif platform == "dy":
             creator_ids = config.creator_ids or []
             video_urls = config.note_urls or []
+            publish_time = extra.get("publish_time_type", 0)
             lines.extend([
                 "",
+                f"PUBLISH_TIME_TYPE = {publish_time}",
                 f"DY_CREATOR_ID_LIST = {json.dumps(creator_ids)}",
                 f"DY_SPECIFIED_ID_LIST = {json.dumps(video_urls)}",
             ])
         elif platform == "bili":
             creator_ids = config.creator_ids or []
             video_urls = config.note_urls or []
+            bili_qn = extra.get("bili_qn", 80)
+            bili_search_mode = extra.get("bili_search_mode", "normal")
             lines.extend([
                 "",
+                f"BILI_QN = {bili_qn}",
+                f'BILI_SEARCH_MODE = "{bili_search_mode}"',
                 f"BILI_CREATOR_ID_LIST = {json.dumps(creator_ids)}",
                 f"BILI_SPECIFIED_ID_LIST = {json.dumps(video_urls)}",
             ])
         elif platform == "wb":
             creator_ids = config.creator_ids or []
             note_urls = config.note_urls or []
+            weibo_search_type = extra.get("weibo_search_type", "default")
+            enable_full_text = extra.get("enable_full_text", True)
+            vip_creator_ids = extra.get("vip_creator_ids", [])
             lines.extend([
                 "",
+                f'WEIBO_SEARCH_TYPE = "{weibo_search_type}"',
+                f"ENABLE_WEIBO_FULL_TEXT = {enable_full_text}",
                 f"WEIBO_CREATOR_ID_LIST = {json.dumps(creator_ids)}",
                 f"WEIBO_SPECIFIED_ID_LIST = {json.dumps(note_urls)}",
+                f"WEIBO_VIP_CREATOR_ID_LIST = {json.dumps(vip_creator_ids)}",
+            ])
+        elif platform == "wechat":
+            creator_ids = config.creator_ids or []
+            note_urls = config.note_urls or []
+            album_ids_raw = extra.get("wechat_album_ids", "")
+            album_ids = []
+            if isinstance(album_ids_raw, str) and album_ids_raw.strip():
+                for line in album_ids_raw.strip().split("\n"):
+                    line = line.strip()
+                    if ":" in line:
+                        parts = line.split(":", 1)
+                        album_ids.append(f"{parts[0]}:{parts[1]}")
+            enable_content = extra.get("wechat_enable_content", False)
+            enable_reading = extra.get("wechat_enable_reading_stats", False)
+            lines.extend([
+                "",
+                f"WECHAT_ACCOUNT_IDS = {json.dumps(creator_ids)}",
+                f"WECHAT_ARTICLE_URLS = {json.dumps(note_urls)}",
+                f"WECHAT_ALBUM_IDS = {json.dumps(album_ids)}",
+                f"ENABLE_GET_ARTICLE_CONTENT = {enable_content}",
+                f"ENABLE_GET_READING_STATS = {enable_reading}",
+            ])
+        elif platform == "tieba":
+            creator_ids = config.creator_ids or []
+            note_urls = config.note_urls or []
+            tieba_names_raw = extra.get("tieba_name_list", "")
+            tieba_names = []
+            if isinstance(tieba_names_raw, str) and tieba_names_raw.strip():
+                tieba_names = [n.strip() for n in tieba_names_raw.split("\n") if n.strip()]
+            lines.extend([
+                "",
+                f"TIEBA_NAME_LIST = {json.dumps(tieba_names)}",
+                f"TIEBA_CREATOR_URL_LIST = {json.dumps(creator_ids)}",
+                f"TIEBA_SPECIFIED_ID_LIST = {json.dumps(note_urls)}",
+            ])
+        elif platform == "zhihu":
+            creator_ids = config.creator_ids or []
+            note_urls = config.note_urls or []
+            lines.extend([
+                "",
+                f"ZHIHU_CREATOR_URL_LIST = {json.dumps(creator_ids)}",
+                f"ZHIHU_SPECIFIED_ID_LIST = {json.dumps(note_urls)}",
+            ])
+        elif platform == "ks":
+            creator_ids = config.creator_ids or []
+            note_urls = config.note_urls or []
+            lines.extend([
+                "",
+                f"KS_CREATOR_ID_LIST = {json.dumps(creator_ids)}",
+                f"KS_SPECIFIED_ID_LIST = {json.dumps(note_urls)}",
             ])
         
         # 其他默认配置
@@ -245,8 +312,6 @@ class CrawlerAdapter:
             "ENABLE_CDP_MODE = False",
             "CDP_HEADLESS = True",
             "",
-            "# Sort type",
-            'SORT_TYPE = ""',
             "START_PAGE = 1",
         ])
         

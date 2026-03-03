@@ -53,6 +53,25 @@ export interface TaskConfig {
   cookies?: string;
   save_option: string;
   extra?: Record<string, unknown>;
+
+  // 平台特有参数（通过 extra 传给后端）
+  // 小红书
+  sort_type?: string;
+  // 抖音
+  publish_time_type?: string;
+  // B站
+  bili_search_mode?: string;
+  bili_qn?: string;
+  // 微博
+  weibo_search_type?: string;
+  enable_full_text?: boolean;
+  vip_creator_ids?: string[];
+  // 微信
+  wechat_album_ids?: string;
+  wechat_enable_content?: boolean;
+  wechat_enable_reading_stats?: boolean;
+  // 贴吧
+  tieba_name_list?: string;
 }
 
 // 任务进度
