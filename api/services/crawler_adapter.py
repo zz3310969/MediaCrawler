@@ -317,9 +317,39 @@ class CrawlerAdapter:
         
         return "\n".join(lines)
     
+    def _clear_browser_singleton_lock(self, platform: str) -> None:
+        """
+        清理 Chromium persistent_context 的 SingletonLock 文件。
+        上一个任务结束后，Chrome 有时会在 user_data_dir 留下 SingletonLock，
+        导致下一次 launch_persistent_context 立即失败（TargetClosedError）。
+        """
+        import config as mc_config
+        user_data_dir_tpl = getattr(mc_config, "USER_DATA_DIR", "%s_user_data_dir")
+        user_data_dir = PROJECT_ROOT / "browser_data" / (user_data_dir_tpl % platform)
+        lock_file = user_data_dir / "SingletonLock"
+        if lock_file.exists():
+            try:
+                lock_file.unlink()
+                logger.info(f"已清理 browser SingletonLock: {lock_file}")
+            except Exception as e:
+                logger.warning(f"清理 SingletonLock 失败（可忽略）: {e}")
+        # 同时清理 Default/Singleton* 
+        default_dir = user_data_dir / "Default"
+        for pattern in ("SingletonLock", "SingletonCookie", "SingletonSocket"):
+            f = user_data_dir / pattern
+            if f.exists():
+                try:
+                    f.unlink()
+                except Exception:
+                    pass
+
     async def _run_subprocess(self, config_path: str) -> Dict[str, Any]:
         """使用子进程执行爬虫"""
         await self.ctx.info("启动爬虫子进程...")
+
+        # 在启动新子进程前清理上次遗留的浏览器锁文件，避免 TargetClosedError
+        platform = self.task.config.platform
+        self._clear_browser_singleton_lock(platform)
         
         # 构建命令
         # 使用 PYTHONPATH 和自定义配置运行
