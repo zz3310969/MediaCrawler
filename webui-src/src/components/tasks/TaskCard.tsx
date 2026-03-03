@@ -113,9 +113,10 @@ export function TaskCard({ task, onAction }: TaskCardProps) {
               <Pause className="w-4 h-4 text-text-secondary" />
             </button>
           )}
-          {task.status === 'failed' && (
+          {(task.status === 'failed' || task.status === 'completed') && (
             <button
               onClick={() => onAction?.('restart', task.task_id)}
+              title={task.status === 'completed' ? '重新运行' : '重试'}
               className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 transition-colors"
             >
               <RotateCcw className="w-4 h-4 text-text-secondary" />

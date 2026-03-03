@@ -318,8 +318,8 @@ class TaskManager:
         """
         task = await self.get_task(session_id, task_id)
         
-        if task.status not in (TaskStatus.FAILED, TaskStatus.CANCELLED):
-            raise TaskManagerError("Can only retry failed or cancelled tasks")
+        if task.status not in (TaskStatus.FAILED, TaskStatus.CANCELLED, TaskStatus.COMPLETED):
+            raise TaskManagerError("Can only retry failed, cancelled or completed tasks")
         
         # 方案1：从死信队列恢复
         if await self._queue.retry_dead_letter(task_id):

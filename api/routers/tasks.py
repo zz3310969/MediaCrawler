@@ -161,13 +161,13 @@ async def cancel_task(
 @router.post("/{task_id}/retry", response_model=Task)
 async def retry_task(
     task_id: str,
-    session_id: str = Depends(require_session_id)
+    session: Session = Depends(require_session)
 ):
-    """重试任务"""
+    """重试/重跑任务（支持 failed、cancelled、completed 状态）"""
     task_manager = get_task_manager()
     
     try:
-        return await task_manager.retry_task(session_id, task_id)
+        return await task_manager.retry_task(session.session_id, task_id)
     except TaskNotFoundError:
         raise HTTPException(status_code=404, detail="Task not found")
     except PermissionDeniedError:
