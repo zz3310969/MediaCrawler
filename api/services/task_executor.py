@@ -113,6 +113,9 @@ class TaskContext:
     
     async def warn(self, message: str, **extra):
         await self.log("warn", message, **extra)
+
+    async def warning(self, message: str, **extra):
+        await self.log("warn", message, **extra)
     
     async def error(self, message: str, **extra):
         await self.log("error", message, **extra)
@@ -154,6 +157,7 @@ class TaskExecutor:
         # 运行状态
         self._running = False
         self._current_tasks: Dict[str, asyncio.Task] = {}
+        self._active_crawl_tasks: Dict[str, asyncio.Task] = {}
     
     async def start(self, worker_count: int = 1) -> None:
         """启动 worker"""
@@ -226,10 +230,8 @@ class TaskExecutor:
             await self._queue.ack(lease.lease_id)
             return
         
-        # 取消事件
         cancel_event = asyncio.Event()
         
-        # 创建上下文
         context = TaskContext(
             task=task,
             storage=self._storage,
@@ -237,13 +239,11 @@ class TaskExecutor:
             cancel_event=cancel_event
         )
         
-        # 启动心跳
         heartbeat_task = asyncio.create_task(
             self._heartbeat_loop(lease, task, cancel_event)
         )
         
         try:
-            # 更新状态为运行中
             await self._storage.update(task.task_id, {
                 "status": TaskStatus.RUNNING,
                 "started_at": datetime.utcnow(),
@@ -258,17 +258,41 @@ class TaskExecutor:
             
             await context.info(f"Task started on worker {worker_name}")
             
-            # 获取平台信号量
             platform = task.config.platform
             platform_sem = self._platform_sems.get(platform)
             
-            if platform_sem:
-                async with platform_sem:
+            async def _do_crawl():
+                if platform_sem:
+                    async with platform_sem:
+                        await self._run_crawler(task, context)
+                else:
                     await self._run_crawler(task, context)
-            else:
-                await self._run_crawler(task, context)
+
+            crawl_task = asyncio.create_task(_do_crawl())
+            self._active_crawl_tasks[task.task_id] = crawl_task
+
+            cancel_watcher = asyncio.create_task(cancel_event.wait())
+            try:
+                done, _ = await asyncio.wait(
+                    [crawl_task, cancel_watcher],
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if cancel_watcher in done and crawl_task not in done:
+                    crawl_task.cancel()
+                    try:
+                        await crawl_task
+                    except (asyncio.CancelledError, Exception):
+                        pass
+                    raise asyncio.CancelledError("Task cancelled by user")
+                cancel_watcher.cancel()
+                crawl_task.result()
+            finally:
+                self._active_crawl_tasks.pop(task.task_id, None)
+                if not cancel_watcher.done():
+                    cancel_watcher.cancel()
+                if not crawl_task.done():
+                    crawl_task.cancel()
             
-            # 执行成功
             await self._queue.ack(lease.lease_id)
             
             await self._storage.update(task.task_id, {
@@ -287,7 +311,6 @@ class TaskExecutor:
             logger.info(f"Task {task.task_id} completed")
         
         except asyncio.CancelledError:
-            # 任务被取消
             await self._queue.nack(lease.lease_id, "Cancelled by user", retry=False)
             
             await self._storage.update(task.task_id, {
@@ -305,9 +328,8 @@ class TaskExecutor:
             logger.info(f"Task {task.task_id} cancelled")
         
         except Exception as e:
-            # 执行失败
             error_msg = str(e)
-            should_retry = not isinstance(e, (ValueError, KeyError))  # 非致命错误才重试
+            should_retry = not isinstance(e, (ValueError, KeyError))
             
             await self._queue.nack(lease.lease_id, error_msg, retry=should_retry)
             
@@ -328,7 +350,6 @@ class TaskExecutor:
             logger.error(f"Task {task.task_id} failed: {e}", exc_info=True)
         
         finally:
-            # 停止心跳
             heartbeat_task.cancel()
             try:
                 await heartbeat_task
@@ -343,11 +364,16 @@ class TaskExecutor:
         if not crawler:
             raise ValueError(f"Unknown platform: {platform}")
         
-        # 带超时执行
-        await asyncio.wait_for(
-            crawler(task, context),
-            timeout=self._task_timeout
-        )
+        try:
+            await asyncio.wait_for(
+                crawler(task, context),
+                timeout=self._task_timeout
+            )
+        except asyncio.TimeoutError:
+            raise TimeoutError(
+                f"任务执行超时（超过 {self._task_timeout} 秒），"
+                f"可能是爬虫卡在登录环节，请检查 Cookie 或登录状态是否有效"
+            )
     
     async def _heartbeat_loop(
         self,
@@ -355,25 +381,27 @@ class TaskExecutor:
         task: Task,
         cancel_event: asyncio.Event
     ) -> None:
-        """心跳循环"""
+        """心跳循环 - 每 5 秒检查取消标记，每 heartbeat_interval 秒续租"""
+        cancel_check_interval = 5
+        elapsed_since_heartbeat = 0
+
         while True:
-            await asyncio.sleep(self._heartbeat_interval)
+            await asyncio.sleep(cancel_check_interval)
+            elapsed_since_heartbeat += cancel_check_interval
             
             try:
-                # 续租
-                await self._queue.heartbeat(lease.lease_id, self._lease_extend)
-                
-                # 检查取消标记
                 fresh_task = await self._storage.get(task.task_id)
                 if fresh_task and fresh_task.cancel_requested:
                     cancel_event.set()
-                    logger.info(f"Task {task.task_id} cancel requested")
-                
-                # 更新心跳时间
-                await self._storage.update(task.task_id, {
-                    "last_heartbeat_at": datetime.utcnow()
-                })
-            
+                    logger.info(f"Task {task.task_id} cancel requested, signalling cancellation")
+                    return
+
+                if elapsed_since_heartbeat >= self._heartbeat_interval:
+                    elapsed_since_heartbeat = 0
+                    await self._queue.heartbeat(lease.lease_id, self._lease_extend)
+                    await self._storage.update(task.task_id, {
+                        "last_heartbeat_at": datetime.utcnow()
+                    })
             except Exception as e:
                 logger.error(f"Heartbeat error: {e}")
 

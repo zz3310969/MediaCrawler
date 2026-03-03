@@ -148,9 +148,9 @@ async def cancel_task(
     try:
         success = await task_manager.cancel_task(session_id, task_id)
         if success:
-            return {"message": "Task cancelled"}
+            return {"message": "Task cancel requested"}
         else:
-            return {"message": "Task cannot be cancelled"}
+            raise HTTPException(status_code=400, detail="Task cannot be cancelled in current status")
     except TaskNotFoundError:
         raise HTTPException(status_code=404, detail="Task not found")
     except PermissionDeniedError:
