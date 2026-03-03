@@ -114,11 +114,11 @@ def rfc2822_to_timestamp(rfc2822_time):
     # Define RFC 2822 format
     rfc2822_format = "%a %b %d %H:%M:%S %z %Y"
 
-    # Convert RFC 2822 time string to datetime object
+    # Convert RFC 2822 time string to datetime object (preserves original timezone from %z)
     dt_object = datetime.strptime(rfc2822_time, rfc2822_format)
 
-    # Convert datetime object to UTC time
-    dt_utc = dt_object.replace(tzinfo=timezone.utc)
+    # Convert to UTC time (astimezone correctly accounts for original timezone offset)
+    dt_utc = dt_object.astimezone(timezone.utc)
 
     # Calculate Unix timestamp from UTC time
     timestamp = int(dt_utc.timestamp())

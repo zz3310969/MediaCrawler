@@ -28,6 +28,8 @@ def _timestamp_to_datetime(ts: int) -> Optional[datetime]:
 def _datetime_to_timestamp(dt: Optional[datetime]) -> int:
     if not dt:
         return 0
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
     return int(dt.timestamp())
 
 
