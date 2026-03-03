@@ -7,8 +7,8 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Request, Response, Depends
 
 from api.services.factory import get_session_store
-from api.schemas.session import Session, SessionCreateRequest, SessionResponse
-from api.schemas.user import LoginRequest, LoginResponse, User as UserSchema
+from api.schemas.session import SessionResponse
+from api.schemas.user import LoginRequest
 from api.middleware.session import get_current_session, get_session_id
 
 logger = logging.getLogger(__name__)
@@ -16,56 +16,23 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
-@router.post("/session", response_model=SessionResponse)
-async def create_session(
-    request: SessionCreateRequest = None,
-    response: Response = None
-):
+@router.get("/session", response_model=SessionResponse)
+async def get_session_info():
     """
-    创建/获取匿名 Session
+    获取当前 Session 信息（需要已登录）
     
-    如果请求中已有有效 session，则返回现有 session
+    仅返回当前有效 session 信息，不再支持创建匿名 session
     """
-    # 如果有有效 session，返回现有的
     current_session = get_current_session()
-    if current_session:
-        return SessionResponse(
-            session_id=current_session.session_id,
-            user_id=current_session.user_id,
-            created_at=current_session.created_at,
-            expires_at=current_session.expires_at,
-            quota=current_session.quota
-        )
-    
-    # 创建新 session
-    session_store = get_session_store()
-    
-    user_id = request.user_id if request else None
-    expire_hours = request.expire_hours if request else 24
-    
-    session = await session_store.create(
-        user_id=user_id,
-        expire_hours=expire_hours
-    )
-    
-    # 设置 Cookie（可选）
-    if response:
-        response.set_cookie(
-            key="session_id",
-            value=session.session_id,
-            httponly=True,
-            max_age=expire_hours * 3600,
-            samesite="lax"
-        )
-    
-    logger.info(f"Session created: {session.session_id[:8]}...")
+    if not current_session:
+        raise HTTPException(status_code=401, detail="未登录，请先使用账号密码登录")
     
     return SessionResponse(
-        session_id=session.session_id,
-        user_id=session.user_id,
-        created_at=session.created_at,
-        expires_at=session.expires_at,
-        quota=session.quota
+        session_id=current_session.session_id,
+        user_id=current_session.user_id,
+        created_at=current_session.created_at,
+        expires_at=current_session.expires_at,
+        quota=current_session.quota
     )
 
 

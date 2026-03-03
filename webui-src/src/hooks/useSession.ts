@@ -4,13 +4,13 @@
  */
 import { useState, useEffect, useCallback } from 'react';
 import { 
-  createSession, 
   getCurrentUser, 
   logout as apiLogout,
 } from '../api/tasks';
 import {
   getStoredSessionId,
-  clearStoredSessionId 
+  clearStoredSessionId,
+  redirectToLogin,
 } from '../api/session';
 import type { SessionResponse } from '../types/task';
 
@@ -28,30 +28,26 @@ export function useSession(): UseSessionReturn {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
 
-  // 初始化 session
   const initSession = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
       
-      // 检查是否已有 session
       const sessionId = getStoredSessionId();
       
       if (sessionId) {
-        // 验证现有 session
         try {
           const data = await getCurrentUser();
           setSession(data);
           return;
         } catch {
-          // session 无效，清除
           clearStoredSessionId();
         }
       }
       
-      // 创建新 session
-      const data = await createSession();
-      setSession(data);
+      // 没有有效 session，跳转到登录页
+      setSession(null);
+      redirectToLogin();
     } catch (e) {
       setError(e as Error);
       console.error('Session init error:', e);
@@ -60,20 +56,18 @@ export function useSession(): UseSessionReturn {
     }
   }, []);
 
-  // 登出
   const logout = useCallback(async () => {
     try {
       await apiLogout();
     } catch (e) {
       console.error('Logout error:', e);
     } finally {
+      clearStoredSessionId();
       setSession(null);
-      // 重新创建匿名 session
-      await initSession();
+      redirectToLogin();
     }
-  }, [initSession]);
+  }, []);
 
-  // 刷新
   const refresh = useCallback(async () => {
     await initSession();
   }, [initSession]);

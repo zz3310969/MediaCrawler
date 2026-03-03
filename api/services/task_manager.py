@@ -104,7 +104,7 @@ class TaskManager:
         
         # 4. 配额检查：并发任务数
         if not is_api_key:
-            running_count = await self._get_running_count(session_id)
+            running_count = await self._get_running_count(session.user_id, session_id)
             if running_count >= session.quota.max_concurrent_tasks:
                 raise QuotaExceededError("Concurrent task limit exceeded")
         
@@ -137,9 +137,11 @@ class TaskManager:
             except Exception as e:
                 logger.warning(f"查询账号 Cookie 失败: {e}，任务将尝试使用本地登录态")
 
-        # 6. 创建任务对象
+        # 6. 创建任务对象（写入 user_id 实现持久化关联）
+        user_id = session.user_id if not is_api_key and session else None
         task = Task(
             session_id=session_id,
+            user_id=user_id,
             task_name=request.task_name,
             platform=request.config.platform,
             crawler_type=request.config.crawler_type,
@@ -179,10 +181,10 @@ class TaskManager:
         logger.info(f"Task created: {task.task_id}")
         return task
     
-    async def _get_running_count(self, session_id: str) -> int:
+    async def _get_running_count(self, user_id: Optional[str], session_id: str) -> int:
         """获取用户运行中的任务数"""
-        tasks = await self._storage.get_by_session(
-            session_id, status=TaskStatus.RUNNING
+        tasks = await self._storage.get_by_user(
+            user_id=user_id, session_id=session_id, status=TaskStatus.RUNNING
         )
         return len(tasks)
     
@@ -194,7 +196,6 @@ class TaskManager:
         
         Raises:
             TaskNotFoundError: 任务不存在
-            PermissionDeniedError: 无权访问
         """
         task = await self._storage.get(task_id)
         if not task:
@@ -211,26 +212,28 @@ class TaskManager:
     async def list_tasks(
         self,
         session_id: str,
-        request: TaskListRequest
+        request: TaskListRequest,
+        user_id: Optional[str] = None
     ) -> List[Task]:
-        """获取任务列表"""
+        """获取任务列表（按 user_id 过滤，无 user_id 时全量）"""
         offset = (request.page - 1) * request.page_size
         
-        return await self._storage.get_by_session(
-            session_id,
+        return await self._storage.get_by_user(
+            user_id=user_id,
+            session_id=session_id,
             status=request.status,
             platform=request.platform,
             limit=request.page_size,
             offset=offset
         )
     
-    async def count_tasks(self, session_id: str) -> int:
+    async def count_tasks(self, session_id: str, user_id: Optional[str] = None) -> int:
         """获取任务总数"""
-        return await self._storage.count_by_session(session_id)
+        return await self._storage.count_by_user(user_id=user_id, session_id=session_id)
     
-    async def get_stats(self, session_id: str) -> TaskStatsResponse:
+    async def get_stats(self, session_id: str, user_id: Optional[str] = None) -> TaskStatsResponse:
         """获取任务统计"""
-        counts = await self._storage.count_by_status(session_id)
+        counts = await self._storage.count_by_status(user_id=user_id)
         
         return TaskStatsResponse(
             pending=counts.get("pending", 0),

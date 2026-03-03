@@ -15,8 +15,9 @@ from api.schemas.task import (
     Task, TaskStatus, TaskCreateRequest, 
     TaskListRequest, TaskListResponse, TaskStatsResponse
 )
+from api.schemas.session import Session
 from api.schemas.event import LogEntry
-from api.middleware.session import require_session_id
+from api.middleware.session import require_session, require_session_id
 
 logger = logging.getLogger(__name__)
 
@@ -26,14 +27,14 @@ router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 @router.post("/", response_model=Task)
 async def create_task(
     request: TaskCreateRequest,
-    session_id: str = Depends(require_session_id)
+    session: Session = Depends(require_session)
 ):
     """创建任务"""
     task_manager = get_task_manager()
     
     try:
-        task = await task_manager.create_task(session_id, request)
-        logger.info(f"Task created: {task.task_id} by session {session_id[:8]}")
+        task = await task_manager.create_task(session.session_id, request)
+        logger.info(f"Task created: {task.task_id} by user {session.user_id or 'anonymous'}")
         return task
     except QuotaExceededError as e:
         raise HTTPException(status_code=429, detail=str(e))
@@ -49,20 +50,20 @@ async def list_tasks(
     platform: Optional[str] = Query(None, description="Filter by platform"),
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(20, ge=1, le=100, description="Page size"),
-    session_id: str = Depends(require_session_id)
+    session: Session = Depends(require_session)
 ):
     """获取任务列表"""
     task_manager = get_task_manager()
     
-    request = TaskListRequest(
+    list_request = TaskListRequest(
         status=status,
         platform=platform,
         page=page,
         page_size=page_size
     )
     
-    tasks = await task_manager.list_tasks(session_id, request)
-    total = await task_manager.count_tasks(session_id)
+    tasks = await task_manager.list_tasks(session.session_id, list_request, user_id=session.user_id)
+    total = await task_manager.count_tasks(session.session_id, user_id=session.user_id)
     
     return TaskListResponse(
         tasks=tasks,
@@ -74,11 +75,11 @@ async def list_tasks(
 
 @router.get("/stats", response_model=TaskStatsResponse)
 async def get_task_stats(
-    session_id: str = Depends(require_session_id)
+    session: Session = Depends(require_session)
 ):
     """获取任务统计"""
     task_manager = get_task_manager()
-    return await task_manager.get_stats(session_id)
+    return await task_manager.get_stats(session.session_id, user_id=session.user_id)
 
 
 @router.get("/{task_id}", response_model=Task)

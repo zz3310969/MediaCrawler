@@ -56,7 +56,6 @@ class SessionMiddleware(BaseHTTPMiddleware):
         "/docs",
         "/redoc",
         "/openapi.json",
-        "/api/auth/session",
         "/api/auth/login",
         "/api/health",
         "/health",
@@ -201,11 +200,27 @@ class SessionMiddleware(BaseHTTPMiddleware):
 # ========== FastAPI 依赖项 ==========
 
 async def require_session(request: Request) -> Session:
-    """要求有效的 Session（FastAPI 依赖项）"""
+    """要求有效的 Session（FastAPI 依赖项），也兼容 API Key 认证"""
     session = get_current_session()
-    if not session:
-        raise HTTPException(status_code=401, detail="Session required")
-    return session
+    if session:
+        return session
+    
+    # API Key 认证场景：没有真实 session，构造临时 session 供路由使用
+    api_key_id = get_api_key_id()
+    if api_key_id:
+        from api.schemas.session import SessionQuota
+        from datetime import timedelta, timezone
+        now = __import__('datetime').datetime.now(timezone.utc)
+        return Session(
+            session_id=f"apikey:{api_key_id}",
+            user_id=None,
+            created_at=now,
+            expires_at=now + timedelta(hours=24),
+            last_active=now,
+            quota=SessionQuota(max_concurrent_tasks=10, max_daily_tasks=1000)
+        )
+    
+    raise HTTPException(status_code=401, detail="需要登录，请先使用账号密码登录")
 
 
 async def require_session_id(request: Request) -> str:

@@ -236,17 +236,20 @@ class DatabaseTaskStorage(ITaskStorage):
 
     # ========== 批量操作 ==========
 
-    async def get_by_session(
+    async def get_by_user(
         self,
-        session_id: str,
+        user_id: Optional[str] = None,
+        session_id: Optional[str] = None,
         status: Optional[TaskStatus] = None,
         platform: Optional[str] = None,
         limit: int = 100,
         offset: int = 0
     ) -> List[Task]:
-        # 数据库存储不按 session 隔离（session 为内存级别，重启后变化），查询全部任务
+        """按 user_id 查询任务，user_id 为空时全量查询（向后兼容）"""
         async with self._get_session() as session:
             query = select(CrawlerTask)
+            if user_id:
+                query = query.where(CrawlerTask.user_id == user_id)
             if status:
                 s = status if isinstance(status, str) else status.value
                 query = query.where(CrawlerTask.status == s)
@@ -256,6 +259,19 @@ class DatabaseTaskStorage(ITaskStorage):
 
             result = await session.execute(query)
             return [_db_task_to_schema(r) for r in result.scalars().all()]
+
+    async def get_by_session(
+        self,
+        session_id: str,
+        status: Optional[TaskStatus] = None,
+        platform: Optional[str] = None,
+        limit: int = 100,
+        offset: int = 0
+    ) -> List[Task]:
+        """兼容旧接口，委托给 get_by_user（全量查询）"""
+        return await self.get_by_user(
+            status=status, platform=platform, limit=limit, offset=offset
+        )
 
     async def get_by_status(
         self,
@@ -395,16 +411,19 @@ class DatabaseTaskStorage(ITaskStorage):
 
     async def count_by_status(
         self,
-        session_id: Optional[str] = None
+        session_id: Optional[str] = None,
+        user_id: Optional[str] = None
     ) -> Dict[str, int]:
-        # 数据库存储不按 session 隔离，统计全部任务
+        """按状态统计任务数，有 user_id 时仅统计该用户"""
         async with self._get_session() as session:
             counts = {s.value: 0 for s in TaskStatus}
             query = (
                 select(CrawlerTask.status, func.count())
                 .select_from(CrawlerTask)
-                .group_by(CrawlerTask.status)
             )
+            if user_id:
+                query = query.where(CrawlerTask.user_id == user_id)
+            query = query.group_by(CrawlerTask.status)
 
             result = await session.execute(query)
             for status_val, cnt in result.all():
@@ -415,17 +434,27 @@ class DatabaseTaskStorage(ITaskStorage):
     async def get_recent_tasks(
         self,
         session_id: str,
-        limit: int = 10
+        limit: int = 10,
+        user_id: Optional[str] = None
     ) -> List[Task]:
-        return await self.get_by_session(session_id, limit=limit)
+        return await self.get_by_user(user_id=user_id, limit=limit)
+
+    async def count_by_user(
+        self,
+        user_id: Optional[str] = None,
+        session_id: Optional[str] = None
+    ) -> int:
+        """统计任务数，有 user_id 时仅统计该用户"""
+        async with self._get_session() as session:
+            query = select(func.count()).select_from(CrawlerTask)
+            if user_id:
+                query = query.where(CrawlerTask.user_id == user_id)
+            result = await session.execute(query)
+            return result.scalar() or 0
 
     async def count_by_session(self, session_id: str) -> int:
-        # 数据库存储不按 session 隔离，统计全部任务数
-        async with self._get_session() as session:
-            result = await session.execute(
-                select(func.count()).select_from(CrawlerTask)
-            )
-            return result.scalar() or 0
+        """兼容旧接口，全量统计"""
+        return await self.count_by_user()
 
     # ========== 维护 ==========
 

@@ -61,6 +61,19 @@ class ITaskStorage(ABC):
     # ========== 批量操作 ==========
     
     @abstractmethod
+    async def get_by_user(
+        self,
+        user_id: Optional[str] = None,
+        session_id: Optional[str] = None,
+        status: Optional[TaskStatus] = None,
+        platform: Optional[str] = None,
+        limit: int = 100,
+        offset: int = 0
+    ) -> List[Task]:
+        """按 user_id 查询任务，user_id 为空时全量查询"""
+        pass
+
+    @abstractmethod
     async def get_by_session(
         self, 
         session_id: str,
@@ -69,7 +82,7 @@ class ITaskStorage(ABC):
         limit: int = 100,
         offset: int = 0
     ) -> List[Task]:
-        """获取用户任务"""
+        """获取用户任务（兼容旧接口）"""
         pass
     
     @abstractmethod
@@ -139,16 +152,26 @@ class ITaskStorage(ABC):
     
     @abstractmethod
     async def get_recent_tasks(
-        self, 
-        session_id: str, 
-        limit: int = 10
+        self,
+        session_id: str,
+        limit: int = 10,
+        user_id: Optional[str] = None
     ) -> List[Task]:
         """获取最近任务"""
         pass
     
     @abstractmethod
+    async def count_by_user(
+        self,
+        user_id: Optional[str] = None,
+        session_id: Optional[str] = None
+    ) -> int:
+        """按 user_id 统计任务数，user_id 为空时全量统计"""
+        pass
+
+    @abstractmethod
     async def count_by_session(self, session_id: str) -> int:
-        """获取用户任务总数"""
+        """获取用户任务总数（兼容旧接口）"""
         pass
     
     # ========== 维护 ==========

@@ -137,7 +137,30 @@ class MemoryTaskStorage(ITaskStorage):
         return task_id in self._tasks
     
     # ========== 批量操作 ==========
-    
+
+    async def get_by_user(
+        self,
+        user_id: Optional[str] = None,
+        session_id: Optional[str] = None,
+        status: Optional[TaskStatus] = None,
+        platform: Optional[str] = None,
+        limit: int = 100,
+        offset: int = 0
+    ) -> List[Task]:
+        """按 user_id 查询任务，内存存储中 user_id 为空时查全量"""
+        all_tasks = list(self._tasks.values())
+        tasks = []
+        for task in all_tasks:
+            if user_id and task.user_id != user_id:
+                continue
+            if status and task.status != status:
+                continue
+            if platform and task.config.platform != platform:
+                continue
+            tasks.append(task)
+        tasks.sort(key=lambda t: t.created_at, reverse=True)
+        return tasks[offset:offset + limit]
+
     async def get_by_session(
         self, 
         session_id: str,
@@ -146,26 +169,10 @@ class MemoryTaskStorage(ITaskStorage):
         limit: int = 100,
         offset: int = 0
     ) -> List[Task]:
-        """获取用户任务"""
-        task_ids = self._session_tasks.get(session_id, [])
-        
-        # 过滤
-        tasks = []
-        for tid in task_ids:
-            task = self._tasks.get(tid)
-            if not task:
-                continue
-            if status and task.status != status:
-                continue
-            if platform and task.config.platform != platform:
-                continue
-            tasks.append(task)
-        
-        # 按创建时间倒序
-        tasks.sort(key=lambda t: t.created_at, reverse=True)
-        
-        # 分页
-        return tasks[offset:offset + limit]
+        """获取用户任务（兼容旧接口）"""
+        return await self.get_by_user(
+            status=status, platform=platform, limit=limit, offset=offset
+        )
     
     async def get_by_status(
         self, 
@@ -266,18 +273,17 @@ class MemoryTaskStorage(ITaskStorage):
     # ========== 统计查询 ==========
     
     async def count_by_status(
-        self, 
-        session_id: Optional[str] = None
+        self,
+        session_id: Optional[str] = None,
+        user_id: Optional[str] = None
     ) -> Dict[str, int]:
-        """按状态统计"""
+        """按状态统计，有 user_id 时仅统计该用户"""
         counts = {status.value: 0 for status in TaskStatus}
         
-        if session_id:
-            task_ids = self._session_tasks.get(session_id, [])
-            tasks = [self._tasks.get(tid) for tid in task_ids]
-            tasks = [t for t in tasks if t]
+        if user_id:
+            tasks = [t for t in self._tasks.values() if t.user_id == user_id]
         else:
-            tasks = self._tasks.values()
+            tasks = list(self._tasks.values())
         
         for task in tasks:
             counts[task.status] += 1
@@ -285,16 +291,27 @@ class MemoryTaskStorage(ITaskStorage):
         return counts
     
     async def get_recent_tasks(
-        self, 
-        session_id: str, 
-        limit: int = 10
+        self,
+        session_id: str,
+        limit: int = 10,
+        user_id: Optional[str] = None
     ) -> List[Task]:
         """获取最近任务"""
-        return await self.get_by_session(session_id, limit=limit)
+        return await self.get_by_user(user_id=user_id, limit=limit)
     
+    async def count_by_user(
+        self,
+        user_id: Optional[str] = None,
+        session_id: Optional[str] = None
+    ) -> int:
+        """按 user_id 统计任务数"""
+        if user_id:
+            return sum(1 for t in self._tasks.values() if t.user_id == user_id)
+        return len(self._tasks)
+
     async def count_by_session(self, session_id: str) -> int:
-        """获取用户任务总数"""
-        return len(self._session_tasks.get(session_id, []))
+        """获取用户任务总数（兼容旧接口）"""
+        return await self.count_by_user()
     
     # ========== 维护 ==========
     
