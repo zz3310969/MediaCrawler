@@ -57,6 +57,7 @@ class SessionMiddleware(BaseHTTPMiddleware):
         "/redoc",
         "/openapi.json",
         "/api/auth/session",
+        "/api/auth/login",
         "/api/health",
         "/health",
     }

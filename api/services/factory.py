@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 def create_services(
-    backend: Literal["memory", "redis"] = "memory",
+    backend: Literal["memory", "redis", "database"] = "database",
     redis_url: Optional[str] = None,
     config: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
@@ -23,7 +23,7 @@ def create_services(
     创建服务实例
     
     Args:
-        backend: 后端类型 ("memory" 或 "redis")
+        backend: 后端类型 ("memory", "redis", "database")
         redis_url: Redis 连接 URL
         config: 额外配置
     
@@ -38,23 +38,57 @@ def create_services(
     """
     config = config or {}
     
+    # 队列和事件总线始终用内存版（在线调度）
+    queue = MemoryTaskQueue(
+        max_size=config.get("queue_max_size", 1000),
+        dead_letter_max=config.get("dead_letter_max", 100),
+        default_lease_seconds=config.get("lease_timeout", 300),
+        max_retries=config.get("max_retries", 3)
+    )
+    session_store = MemorySessionStore()
+    event_bus = AsyncioEventBus(
+        queue_size=config.get("event_queue_size", 1000)
+    )
+    
     if backend == "memory":
-        queue = MemoryTaskQueue(
-            max_size=config.get("queue_max_size", 1000),
-            dead_letter_max=config.get("dead_letter_max", 100),
-            default_lease_seconds=config.get("lease_timeout", 300),
-            max_retries=config.get("max_retries", 3)
-        )
         storage = MemoryTaskStorage(
             max_logs_per_task=config.get("max_logs_per_task", 2000),
             log_retention_days=config.get("log_retention_days", 7)
         )
-        session_store = MemorySessionStore()
-        event_bus = AsyncioEventBus(
-            queue_size=config.get("event_queue_size", 1000)
-        )
-        
         logger.info("Created memory backend services")
+    
+    elif backend == "database":
+        from api.services.storage.database import DatabaseTaskStorage
+        from database.db_session import get_async_engine
+        from sqlalchemy.ext.asyncio import AsyncSession
+        from sqlalchemy.orm import sessionmaker
+        from contextlib import asynccontextmanager
+        
+        engine = get_async_engine()
+        if engine is None:
+            logger.warning("No DB engine available, falling back to memory storage")
+            storage = MemoryTaskStorage(
+                max_logs_per_task=config.get("max_logs_per_task", 2000),
+                log_retention_days=config.get("log_retention_days", 7)
+            )
+        else:
+            async_session_factory = sessionmaker(
+                engine, class_=AsyncSession, expire_on_commit=False
+            )
+            
+            @asynccontextmanager
+            async def _session_ctx():
+                session = async_session_factory()
+                try:
+                    yield session
+                except Exception:
+                    await session.rollback()
+                    raise
+                finally:
+                    await session.close()
+            
+            storage = DatabaseTaskStorage(session_factory=_session_ctx)
+            logger.info("Created database backend services (task storage -> DB)")
     
     elif backend == "redis":
         redis_url = redis_url or config.get("redis_url", "redis://localhost:6379/0")
@@ -112,7 +146,7 @@ _services: Optional[Dict[str, Any]] = None
 
 
 def get_services(
-    backend: Literal["memory", "redis"] = "memory",
+    backend: Literal["memory", "redis", "database"] = "database",
     redis_url: Optional[str] = None,
     config: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:

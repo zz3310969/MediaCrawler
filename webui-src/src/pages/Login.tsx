@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowRight, Eye, EyeOff, Check, Github, Loader2 } from 'lucide-react';
-import { createSession } from '../api/tasks';
+import { createSession, loginWithPassword } from '../api/tasks';
 import { getStoredSessionId, getRedirectPath, resetRedirectState } from '../api/session';
 
 export function Login() {
@@ -36,16 +36,25 @@ export function Login() {
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    if (!formData.username.trim()) {
+      setError('请输入用户名');
+      return;
+    }
+    if (!formData.password) {
+      setError('请输入密码');
+      return;
+    }
+    
     setLoading(true);
     setError(null);
     
     try {
-      // 调用后端创建 session
-      // 注意：当前后端的 session 是匿名的，不需要用户名密码
-      // 如果后端需要验证，这里需要调用 login API
-      await createSession();
+      await loginWithPassword({
+        username: formData.username.trim(),
+        password: formData.password,
+      });
       
-      // 登录成功后跳转
       const redirectPath = getRedirectPath();
       navigate(redirectPath, { replace: true });
     } catch (err) {

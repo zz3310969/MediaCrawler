@@ -22,8 +22,35 @@ export { setStoredSessionId, clearStoredSessionId } from './session';
 
 // ========== Session API ==========
 
+export interface LoginRequest {
+  username: string;
+  password: string;
+}
+
+export interface LoginResponseData {
+  session_id: string;
+  user: {
+    user_id: string;
+    username: string;
+    nickname: string;
+    email: string;
+    avatar: string;
+    role: string;
+    status: string;
+  };
+}
+
 /**
- * 创建/获取 Session
+ * 用户名密码登录
+ */
+export async function loginWithPassword(data: LoginRequest): Promise<LoginResponseData> {
+  const res = await client.post<LoginResponseData>('/api/auth/login', data);
+  setStoredSessionId(res.data.session_id);
+  return res.data;
+}
+
+/**
+ * 创建/获取匿名 Session（快速开始）
  */
 export async function createSession(): Promise<SessionResponse> {
   const res = await client.post<SessionResponse>('/api/auth/session');

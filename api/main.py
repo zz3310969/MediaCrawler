@@ -232,17 +232,69 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"[API] ⚠️  WebUI 数据库表初始化失败: {e}")
     
-    # 初始化多任务服务
-    print("[API] 正在初始化多任务服务...")
+    # 创建默认管理员账号（首次启动）
     try:
-        services = get_services()
+        from database.db_session import get_session as get_db_session
+        from api.services.crud.user import user_crud
+        from api.schemas.user import UserCreate, UserRole
+        
+        async with get_db_session() as db_session:
+            if db_session:
+                admin = await user_crud.get_by_username(db_session, "admin")
+                if not admin:
+                    admin_create = UserCreate(
+                        username="admin",
+                        password="admin123",
+                        nickname="管理员",
+                        role=UserRole.ADMIN,
+                    )
+                    await user_crud.create_user(db_session, obj_in=admin_create)
+                    print("[API] ✓ 默认管理员账号已创建 (admin / admin123)")
+                else:
+                    print("[API] ✓ 管理员账号已存在")
+    except Exception as e:
+        print(f"[API] ⚠️  默认管理员账号创建失败: {e}")
+    
+    # 初始化多任务服务（使用 database 后端持久化任务）
+    print("[API] 正在初始化多任务服务...")
+    task_backend = os.environ.get("TASK_BACKEND", "database")
+    try:
+        services = get_services(backend=task_backend)
         event_bus = services["event_bus"]
         await event_bus.start()
         await setup_event_subscriptions()
         await setup_webhook_subscriptions()
-        print("[API] ✓ 多任务服务初始化完成")
+        print(f"[API] ✓ 多任务服务初始化完成 (backend={task_backend})")
     except Exception as e:
         print(f"[API] ⚠️  多任务服务初始化失败: {e}")
+    
+    # 恢复未完成的任务（仅 database 后端）
+    if task_backend == "database":
+        try:
+            storage = services["storage"]
+            queue = services["queue"]
+            from api.schemas.task import TaskStatus as TS
+            
+            # 将上次中断的 running 任务标记为 failed
+            running_tasks = await storage.get_by_status(TS.RUNNING, limit=1000)
+            if running_tasks:
+                running_ids = [t.task_id for t in running_tasks]
+                await storage.bulk_update_status(running_ids, TS.FAILED)
+                print(f"[API] ✓ 已将 {len(running_ids)} 个中断的 running 任务标记为 failed")
+            
+            # 将 pending 任务重新入队
+            pending_tasks = await storage.get_by_status(TS.PENDING, limit=1000)
+            recovered = 0
+            for task in pending_tasks:
+                try:
+                    await queue.enqueue(task)
+                    recovered += 1
+                except Exception:
+                    pass
+            if recovered:
+                print(f"[API] ✓ 已恢复 {recovered} 个 pending 任务到队列")
+        except Exception as e:
+            print(f"[API] ⚠️  任务恢复失败: {e}")
     
     # 启动定时调度服务
     try:

@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Request, Response, Depends
 
 from api.services.factory import get_session_store
 from api.schemas.session import Session, SessionCreateRequest, SessionResponse
+from api.schemas.user import LoginRequest, LoginResponse, User as UserSchema
 from api.middleware.session import get_current_session, get_session_id
 
 logger = logging.getLogger(__name__)
@@ -66,6 +67,75 @@ async def create_session(
         expires_at=session.expires_at,
         quota=session.quota
     )
+
+
+@router.post("/login")
+async def login(
+    login_req: LoginRequest,
+    request: Request,
+    response: Response
+):
+    """
+    用户名密码登录
+    
+    验证成功后创建带 user_id 的 Session
+    """
+    try:
+        from database.db_session import get_session as get_db_session
+        from api.services.crud.user import user_crud
+    except Exception as e:
+        logger.error(f"Failed to import database modules: {e}")
+        raise HTTPException(status_code=500, detail="数据库服务不可用")
+    
+    async with get_db_session() as db_session:
+        if db_session is None:
+            raise HTTPException(status_code=500, detail="数据库连接失败")
+        
+        user = await user_crud.authenticate(
+            db_session,
+            username=login_req.username,
+            password=login_req.password
+        )
+        
+        if not user:
+            raise HTTPException(status_code=401, detail="用户名或密码错误")
+        
+        # 创建带 user_id 的 Session
+        session_store = get_session_store()
+        session = await session_store.create(
+            user_id=user.user_id,
+            expire_hours=24 * 7  # 登录用户 7 天有效
+        )
+        
+        # 更新登录信息
+        client_ip = request.client.host if request.client else ""
+        await user_crud.update_login_info(
+            db_session, db_obj=user, login_ip=client_ip
+        )
+        
+        # 设置 Cookie
+        response.set_cookie(
+            key="session_id",
+            value=session.session_id,
+            httponly=True,
+            max_age=24 * 7 * 3600,
+            samesite="lax"
+        )
+        
+        logger.info(f"User {user.username} logged in, session: {session.session_id[:8]}...")
+        
+        return {
+            "session_id": session.session_id,
+            "user": {
+                "user_id": user.user_id,
+                "username": user.username,
+                "nickname": user.nickname or user.username,
+                "email": user.email or "",
+                "avatar": user.avatar or "",
+                "role": user.role,
+                "status": user.status,
+            }
+        }
 
 
 @router.get("/me", response_model=SessionResponse)
