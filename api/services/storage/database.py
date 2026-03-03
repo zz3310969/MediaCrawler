@@ -244,8 +244,9 @@ class DatabaseTaskStorage(ITaskStorage):
         limit: int = 100,
         offset: int = 0
     ) -> List[Task]:
+        # 数据库存储不按 session 隔离（session 为内存级别，重启后变化），查询全部任务
         async with self._get_session() as session:
-            query = select(CrawlerTask).where(CrawlerTask.session_id == session_id)
+            query = select(CrawlerTask)
             if status:
                 s = status if isinstance(status, str) else status.value
                 query = query.where(CrawlerTask.status == s)
@@ -396,12 +397,14 @@ class DatabaseTaskStorage(ITaskStorage):
         self,
         session_id: Optional[str] = None
     ) -> Dict[str, int]:
+        # 数据库存储不按 session 隔离，统计全部任务
         async with self._get_session() as session:
             counts = {s.value: 0 for s in TaskStatus}
-            query = select(CrawlerTask.status, func.count()).select_from(CrawlerTask)
-            if session_id:
-                query = query.where(CrawlerTask.session_id == session_id)
-            query = query.group_by(CrawlerTask.status)
+            query = (
+                select(CrawlerTask.status, func.count())
+                .select_from(CrawlerTask)
+                .group_by(CrawlerTask.status)
+            )
 
             result = await session.execute(query)
             for status_val, cnt in result.all():
@@ -417,10 +420,10 @@ class DatabaseTaskStorage(ITaskStorage):
         return await self.get_by_session(session_id, limit=limit)
 
     async def count_by_session(self, session_id: str) -> int:
+        # 数据库存储不按 session 隔离，统计全部任务数
         async with self._get_session() as session:
             result = await session.execute(
                 select(func.count()).select_from(CrawlerTask)
-                .where(CrawlerTask.session_id == session_id)
             )
             return result.scalar() or 0
 

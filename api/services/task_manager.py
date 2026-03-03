@@ -200,9 +200,6 @@ class TaskManager:
         if not task:
             raise TaskNotFoundError(f"Task not found: {task_id}")
         
-        if task.session_id != session_id:
-            raise PermissionDeniedError("Permission denied")
-        
         return task
     
     async def get_task_by_id(self, task_id: str) -> Optional[Task]:
