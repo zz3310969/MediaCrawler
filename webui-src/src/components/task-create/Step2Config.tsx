@@ -235,6 +235,20 @@ export function Step2Config({ platform, config, onChange }: Step2ConfigProps) {
             </div>
           </div>
 
+          <Select
+            label="存储方式"
+            options={[
+              { value: 'db', label: 'MySQL 数据库' },
+              { value: 'sqlite', label: 'SQLite 数据库' },
+              { value: 'postgres', label: 'PostgreSQL 数据库' },
+              { value: 'json', label: 'JSON 文件' },
+              { value: 'csv', label: 'CSV 文件' },
+              { value: 'excel', label: 'Excel 文件' },
+            ]}
+            value={config.save_option || 'db'}
+            onChange={(e) => onChange({ save_option: e.target.value as TaskConfig['save_option'] })}
+          />
+
           <Input
             label="并发数"
             type="number"

@@ -114,6 +114,9 @@ export function Step4Confirm({ platform, config, proxyConfig, selectedAccountId,
             )}
             <SummaryItem label="采集数量" value={config.max_notes?.toString() || '100'} />
             <SummaryItem label="数据选项" value={dataOptions.length > 0 ? dataOptions.join('、') : '仅基础数据'} />
+            <SummaryItem label="存储方式" value={
+              { db: 'MySQL 数据库', sqlite: 'SQLite 数据库', postgres: 'PostgreSQL 数据库', json: 'JSON 文件', csv: 'CSV 文件', excel: 'Excel 文件' }[config.save_option || 'db'] || config.save_option || 'db'
+            } />
             {platformExtras.map((item) => (
               <SummaryItem key={item.label} label={item.label} value={item.value} />
             ))}

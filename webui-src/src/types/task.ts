@@ -50,7 +50,11 @@ export interface TaskConfig {
   cookies?: string;                            // Cookie 字符串
   
   // 存储配置
-  save_option: 'csv' | 'json' | 'excel' | 'db' | 'sqlite';
+  save_option: 'csv' | 'json' | 'excel' | 'db' | 'sqlite' | 'postgres';
+
+  // 反爬增强
+  enable_anti_detect?: boolean;
+  anti_detect_config?: Record<string, unknown>;
   
   // 可扩展字段
   extra?: Record<string, unknown>;

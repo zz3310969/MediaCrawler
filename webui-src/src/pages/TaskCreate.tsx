@@ -45,7 +45,7 @@ export function TaskCreate() {
     enable_media: false,
     concurrency: 3,
     crawl_interval: 1.0,
-    save_option: 'json',
+    save_option: 'db',
   });
 
   // 反爬增强配置
@@ -126,7 +126,7 @@ export function TaskCreate() {
         crawl_interval: config.crawl_interval || 1.0,
         account_id: selectedAccountId || undefined,
         login_type: 'cookie' as const,
-        save_option: (config.save_option || 'json') as 'csv' | 'json' | 'excel' | 'db' | 'sqlite',
+        save_option: (config.save_option || 'db') as 'csv' | 'json' | 'excel' | 'db' | 'sqlite' | 'postgres',
         enable_anti_detect: antiDetectEnabled,
         anti_detect_config: antiDetectEnabled ? antiDetectConfig : undefined,
         extra: Object.keys(extra).length > 0 ? extra : undefined,

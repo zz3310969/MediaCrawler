@@ -56,7 +56,7 @@ class TaskConfig(BaseModel):
     cookies: Optional[str] = None                       # Cookie 字符串
     
     # 存储配置
-    save_option: str = "json"                           # json/csv/excel/db/sqlite
+    save_option: str = "db"                             # db(mysql)/sqlite/postgres/json/csv/excel
 
     # 反爬增强配置
     enable_anti_detect: bool = False                    # 是否启用反爬增强

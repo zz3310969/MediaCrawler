@@ -15,7 +15,7 @@ const DEFAULT_CONFIG: CrawlerStartRequest = {
   start_page: 1,
   enable_comments: true,
   enable_sub_comments: false,
-  save_option: 'json',
+  save_option: 'db',
   cookies: '',
   headless: false,
   // 增量爬取配置
