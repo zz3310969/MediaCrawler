@@ -146,6 +146,16 @@ class ZhihuCrawler(AbstractCrawler):
                     browser_context=self.browser_context
                 )
 
+                current_cookie = await self.browser_context.cookies()
+                cookie_str_out, _ = utils.convert_cookies(current_cookie)
+                if cookie_str_out:
+                    print(f"[COOKIE_UPDATE] {cookie_str_out}")
+
+            login_only = getattr(config, 'LOGIN_ONLY', False)
+            if login_only:
+                utils.logger.info("[ZhihuCrawler] Login only mode - skipping crawling")
+                return
+
             # Zhihu's search API requires opening the search page first to access cookies, homepage alone won't work
             utils.logger.info(
                 "[ZhihuCrawler.start] Zhihu navigating to search page to get search page cookies, this process takes about 5 seconds"

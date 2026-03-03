@@ -50,7 +50,7 @@ class WeiboLogin(AbstractLogin):
         self.context_page = context_page
         self.login_phone = login_phone
         self.cookie_str = cookie_str
-        self.weibo_sso_login_url = "https://passport.weibo.com/sso/signin?entry=miniblog&source=miniblog"
+        self.weibo_sso_login_url = "https://passport.weibo.com/sso/signin?entry=wapsso&source=wapssowb"
 
     async def begin(self):
         """Start login weibo"""
@@ -82,23 +82,60 @@ class WeiboLogin(AbstractLogin):
             return True
         return False
 
+    async def _find_qrcode(self, timeout: int = 3000) -> str:
+        """Try multiple selectors to find the QR code image"""
+        qrcode_selectors = [
+            "xpath=//img[@class='w-full h-full']",
+            "xpath=//img[contains(@src,'qrcode') or contains(@src,'QR')]",
+            "xpath=//div[contains(@class,'qrcode')]//img",
+            "xpath=//img[contains(@class,'qrcode')]",
+        ]
+        for selector in qrcode_selectors:
+            try:
+                element = await self.context_page.wait_for_selector(selector, timeout=timeout)
+                if not element:
+                    continue
+                base64_img = await utils.find_login_qrcode(
+                    self.context_page,
+                    selector=selector
+                )
+                if base64_img:
+                    utils.logger.info(f"[WeiboLogin] Found QR code with selector: {selector}")
+                    return base64_img
+            except Exception:
+                continue
+        return ""
+
     async def login_by_qrcode(self):
         """login weibo website and keep webdriver login state"""
         utils.logger.info("[WeiboLogin.login_by_qrcode] Begin login weibo by qrcode ...")
         await self.context_page.goto(self.weibo_sso_login_url)
-        # find login qrcode
-        qrcode_img_selector = "xpath=//img[@class='w-full h-full']"
-        base64_qrcode_img = await utils.find_login_qrcode(
-            self.context_page,
-            selector=qrcode_img_selector
-        )
+        await asyncio.sleep(1)
+
+        base64_qrcode_img = await self._find_qrcode(timeout=3000)
+
         if not base64_qrcode_img:
-            utils.logger.info("[WeiboLogin.login_by_qrcode] login failed , have not found qrcode please check ....")
+            utils.logger.info("[WeiboLogin.login_by_qrcode] QR code not found, trying to click scan button ...")
+            try:
+                scan_btn = self.context_page.locator("text=扫码登录")
+                if await scan_btn.count() > 0:
+                    await scan_btn.first.click()
+                    await asyncio.sleep(1)
+                    base64_qrcode_img = await self._find_qrcode(timeout=5000)
+            except Exception as e:
+                utils.logger.info(f"[WeiboLogin.login_by_qrcode] Click scan button failed: {e}")
+
+        if not base64_qrcode_img:
+            utils.logger.info("[WeiboLogin.login_by_qrcode] login failed, have not found qrcode please check ....")
             sys.exit()
 
-        # show login qrcode
-        partial_show_qrcode = functools.partial(utils.show_qrcode, base64_qrcode_img)
-        asyncio.get_running_loop().run_in_executor(executor=None, func=partial_show_qrcode)
+        # 输出二维码供 WebUI 捕获
+        print(f"[QRCODE_UPDATE] {base64_qrcode_img}")
+
+        # 仅在非 WebUI (login_only) 模式下弹出本地二维码窗口
+        if not getattr(config, 'LOGIN_ONLY', False):
+            partial_show_qrcode = functools.partial(utils.show_qrcode, base64_qrcode_img)
+            asyncio.get_running_loop().run_in_executor(executor=None, func=partial_show_qrcode)
 
         utils.logger.info(f"[WeiboLogin.login_by_qrcode] Waiting for scan code login, remaining time is 20s")
 

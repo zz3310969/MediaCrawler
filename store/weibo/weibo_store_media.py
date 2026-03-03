@@ -128,7 +128,7 @@ class WeiboVipPosterStoreImage(AbstractStoreImage):
         """
         local_path: Optional[str] = None
         oss_url: Optional[str] = None
-        save_mode = getattr(config, 'VIP_POSTER_SAVE_MODE', 'local')
+        save_mode = await oss_uploader.get_save_mode()
 
         # Save to local
         if save_mode in ("local", "both"):

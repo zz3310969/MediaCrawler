@@ -45,6 +45,7 @@ export interface TaskConfig {
   crawl_interval?: number;                     // 请求间隔（秒）
   
   // 登录配置
+  account_id?: string;                         // 关联的账号 ID
   login_type?: 'cookie' | 'qrcode';            // 登录类型
   cookies?: string;                            // Cookie 字符串
   

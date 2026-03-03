@@ -40,8 +40,18 @@ dependencies = [
     "websockets>=15.0.1",
     "asyncpg>=0.31.0",
     "psutil>=7.2.2",
+    "apscheduler>=3.10,<4",
+]
+
+[project.optional-dependencies]
+cos = [
+    "cos-python-sdk-v5>=1.9.30",
 ]
 
 [[tool.uv.index]]
 url = "https://pypi.tuna.tsinghua.edu.cn/simple"
 default = true
+
+[[tool.uv.index]]
+url = "https://pypi.org/simple"
+name = "pypi-fallback"

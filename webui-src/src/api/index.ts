@@ -65,3 +65,7 @@ export {
   getDownloadUrl,
   getDataStats,
 } from './data'
+
+// 系统配置 API
+export { configApi } from './config'
+export type { ConfigType, ConfigDict, ConfigItem, ConfigListResponse } from './config'

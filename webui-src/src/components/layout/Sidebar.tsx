@@ -7,6 +7,7 @@ import {
   Users,
   Settings,
   Bug,
+  Clock,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { NAV_ITEMS } from '../../lib/constants';
@@ -18,6 +19,7 @@ const iconMap: Record<string, React.ComponentType<{ className?: string }>> = {
   Server,
   Users,
   Settings,
+  Clock,
 };
 
 export function Sidebar() {

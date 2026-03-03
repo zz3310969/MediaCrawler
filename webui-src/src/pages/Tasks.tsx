@@ -6,6 +6,8 @@ import { Button } from '../components/common';
 import { TaskCard, TaskTabs } from '../components/tasks';
 import type { TaskStatus, Task } from '../types/task';
 import { useTasks, useStartTask, useCancelTask, useRetryTask, useDeleteTask } from '../hooks';
+import { toast } from '../components/ui/toast';
+import { confirm } from '../components/ui/confirm';
 
 export function Tasks() {
   const [activeTab, setActiveTab] = useState<TaskStatus | 'all'>('all');
@@ -47,18 +49,21 @@ export function Tasks() {
         case 'restart':
           await retryTask(taskId);
           break;
-        case 'delete':
-          if (window.confirm('确定要删除这个任务吗？')) {
-            await deleteTask(taskId);
-          } else {
-            return;
-          }
+        case 'delete': {
+          const ok = await confirm({
+            title: '删除任务',
+            message: '确定要删除这个任务吗？删除后不可恢复。',
+            confirmText: '删除',
+            variant: 'danger',
+          });
+          if (!ok) return;
+          await deleteTask(taskId);
           break;
+        }
       }
       refetch();
     } catch (err: any) {
-      const message = err?.message || '操作失败';
-      alert(message);
+      toast.error(err?.message || '操作失败');
     }
   };
 

@@ -139,6 +139,16 @@ class KuaishouCrawler(AbstractCrawler):
                     browser_context=self.browser_context
                 )
 
+                current_cookie = await self.browser_context.cookies()
+                cookie_str_out, _ = utils.convert_cookies(current_cookie)
+                if cookie_str_out:
+                    print(f"[COOKIE_UPDATE] {cookie_str_out}")
+
+            login_only = getattr(config, 'LOGIN_ONLY', False)
+            if login_only:
+                utils.logger.info("[KuaishouCrawler] Login only mode - skipping crawling")
+                return
+
             crawler_type_var.set(config.CRAWLER_TYPE)
             if config.CRAWLER_TYPE == "search":
                 # Search for videos and retrieve their comment information.

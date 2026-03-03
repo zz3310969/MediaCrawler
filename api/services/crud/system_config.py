@@ -300,40 +300,141 @@ system_config_crud = SystemConfigCRUD()
 
 class ConfigKeys:
     """预定义的配置键常量"""
-    
-    # 代理配置
+
+    # ---- Tab1: 爬虫默认设置 ----
+    CRAWLER_CONCURRENCY = "crawler.concurrency"
+    CRAWLER_REQUEST_INTERVAL = "crawler.request_interval"
+    CRAWLER_MAX_RETRIES = "crawler.max_retries"
+    CRAWLER_TIMEOUT = "crawler.timeout"
+    CRAWLER_ENABLE_COMMENTS = "crawler.enable_comments"
+    CRAWLER_MAX_NOTE_COUNT = "crawler.max_note_count"
+    CRAWLER_SAVE_DATA_OPTION = "crawler.save_data_option"
+
+    # ---- Tab2: 浏览器与反检测 ----
+    BROWSER_HEADLESS = "browser.headless"
+    BROWSER_CDP_MODE = "browser.cdp_mode"
+    BROWSER_SAVE_LOGIN_STATE = "browser.save_login_state"
+    BROWSER_USER_AGENT = "browser.user_agent"
+    BROWSER_CUSTOM_PATH = "browser.custom_path"
+    BROWSER_STEALTH_JS = "browser.stealth_js"
+
+    # ---- Tab3: 代理池设置 ----
     PROXY_ENABLE = "proxy.enable"
     PROXY_POOL_SIZE = "proxy.pool_size"
     PROXY_VALIDATE_TIMEOUT = "proxy.validate_timeout"
     PROXY_BINDING_STICKY = "proxy.binding_sticky"
     PROXY_AUTO_REBIND = "proxy.auto_rebind"
-    
-    # 爬虫配置
-    CRAWLER_CONCURRENCY = "crawler.concurrency"
-    CRAWLER_REQUEST_INTERVAL = "crawler.request_interval"
-    CRAWLER_MAX_RETRIES = "crawler.max_retries"
-    CRAWLER_TIMEOUT = "crawler.timeout"
-    
-    # 系统配置
+    PROXY_PROVIDER = "proxy.provider"
+    PROXY_PROVIDER_API_URL = "proxy.provider_api_url"
+
+    # ---- Tab4: 多账号策略 ----
+    ACCOUNT_POOL_ENABLE = "account.pool_enable"
+    ACCOUNT_ROTATION_STRATEGY = "account.rotation_strategy"
+    ACCOUNT_COOLDOWN_SECONDS = "account.cooldown_seconds"
+    ACCOUNT_MAX_FAILURES = "account.max_failures"
+    ACCOUNT_AUTO_DISABLE = "account.auto_disable"
+
+    # ---- Tab5: 系统运维 ----
     SYSTEM_LOG_LEVEL = "system.log_level"
     SYSTEM_DATA_RETENTION_DAYS = "system.data_retention_days"
     SYSTEM_MAINTENANCE_MODE = "system.maintenance_mode"
+    SYSTEM_AUTO_BACKUP = "system.auto_backup"
+    SYSTEM_BACKUP_INTERVAL_HOURS = "system.backup_interval_hours"
+
+    # ---- Tab6: Webhook 通知 ----
+    WEBHOOK_ENABLE = "webhook.enable"
+    WEBHOOK_URL = "webhook.url"
+    WEBHOOK_SECRET = "webhook.secret"
+    WEBHOOK_ON_TASK_COMPLETE = "webhook.on_task_complete"
+    WEBHOOK_ON_TASK_FAIL = "webhook.on_task_fail"
+    WEBHOOK_ON_ACCOUNT_BANNED = "webhook.on_account_banned"
+    WEBHOOK_RETRY_COUNT = "webhook.retry_count"
+
+    # ---- Tab7: 外部服务 ----
+    COS_SECRET_ID = "external.cos_secret_id"
+    COS_SECRET_KEY = "external.cos_secret_key"
+    COS_REGION = "external.cos_region"
+    COS_BUCKET_NAME = "external.cos_bucket_name"
+    COS_PATH_PREFIX = "external.cos_path_prefix"
+    COS_SAVE_MODE = "external.cos_save_mode"
+    SIGN_SERVER_ENABLE = "external.sign_server_enable"
+    SIGN_SERVER_URL = "external.sign_server_url"
+    SIGN_SERVER_TIMEOUT = "external.sign_server_timeout"
+    SIGN_SERVER_RETRY = "external.sign_server_retry"
 
 
 # 默认配置值
 DEFAULT_CONFIGS = {
-    ConfigKeys.PROXY_ENABLE: True,
-    ConfigKeys.PROXY_POOL_SIZE: 5,
-    ConfigKeys.PROXY_VALIDATE_TIMEOUT: 10,
-    ConfigKeys.PROXY_BINDING_STICKY: True,
-    ConfigKeys.PROXY_AUTO_REBIND: True,
-    
+    # Tab1: 爬虫默认设置
     ConfigKeys.CRAWLER_CONCURRENCY: 3,
     ConfigKeys.CRAWLER_REQUEST_INTERVAL: 1.0,
     ConfigKeys.CRAWLER_MAX_RETRIES: 3,
     ConfigKeys.CRAWLER_TIMEOUT: 30,
-    
+    ConfigKeys.CRAWLER_ENABLE_COMMENTS: True,
+    ConfigKeys.CRAWLER_MAX_NOTE_COUNT: 20,
+    ConfigKeys.CRAWLER_SAVE_DATA_OPTION: "db",
+
+    # Tab2: 浏览器与反检测
+    ConfigKeys.BROWSER_HEADLESS: True,
+    ConfigKeys.BROWSER_CDP_MODE: False,
+    ConfigKeys.BROWSER_SAVE_LOGIN_STATE: True,
+    ConfigKeys.BROWSER_USER_AGENT: "",
+    ConfigKeys.BROWSER_CUSTOM_PATH: "",
+    ConfigKeys.BROWSER_STEALTH_JS: True,
+
+    # Tab3: 代理池设置
+    ConfigKeys.PROXY_ENABLE: False,
+    ConfigKeys.PROXY_POOL_SIZE: 5,
+    ConfigKeys.PROXY_VALIDATE_TIMEOUT: 10,
+    ConfigKeys.PROXY_BINDING_STICKY: True,
+    ConfigKeys.PROXY_AUTO_REBIND: True,
+    ConfigKeys.PROXY_PROVIDER: "",
+    ConfigKeys.PROXY_PROVIDER_API_URL: "",
+
+    # Tab4: 多账号策略
+    ConfigKeys.ACCOUNT_POOL_ENABLE: False,
+    ConfigKeys.ACCOUNT_ROTATION_STRATEGY: "round_robin",
+    ConfigKeys.ACCOUNT_COOLDOWN_SECONDS: 300,
+    ConfigKeys.ACCOUNT_MAX_FAILURES: 3,
+    ConfigKeys.ACCOUNT_AUTO_DISABLE: True,
+
+    # Tab5: 系统运维
     ConfigKeys.SYSTEM_LOG_LEVEL: "INFO",
     ConfigKeys.SYSTEM_DATA_RETENTION_DAYS: 30,
     ConfigKeys.SYSTEM_MAINTENANCE_MODE: False,
+    ConfigKeys.SYSTEM_AUTO_BACKUP: False,
+    ConfigKeys.SYSTEM_BACKUP_INTERVAL_HOURS: 24,
+
+    # Tab6: Webhook 通知
+    ConfigKeys.WEBHOOK_ENABLE: False,
+    ConfigKeys.WEBHOOK_URL: "",
+    ConfigKeys.WEBHOOK_SECRET: "",
+    ConfigKeys.WEBHOOK_ON_TASK_COMPLETE: True,
+    ConfigKeys.WEBHOOK_ON_TASK_FAIL: True,
+    ConfigKeys.WEBHOOK_ON_ACCOUNT_BANNED: True,
+    ConfigKeys.WEBHOOK_RETRY_COUNT: 3,
+
+    # Tab7: 外部服务
+    ConfigKeys.COS_SECRET_ID: "",
+    ConfigKeys.COS_SECRET_KEY: "",
+    ConfigKeys.COS_REGION: "ap-shanghai",
+    ConfigKeys.COS_BUCKET_NAME: "",
+    ConfigKeys.COS_PATH_PREFIX: "",
+    ConfigKeys.COS_SAVE_MODE: "oss",
+    ConfigKeys.SIGN_SERVER_ENABLE: False,
+    ConfigKeys.SIGN_SERVER_URL: "http://localhost:8989",
+    ConfigKeys.SIGN_SERVER_TIMEOUT: 10.0,
+    ConfigKeys.SIGN_SERVER_RETRY: 2,
+}
+
+
+# 配置类型与键前缀的映射
+CONFIG_TYPE_MAP = {
+    "crawler": "crawler.",
+    "browser": "browser.",
+    "proxy": "proxy.",
+    "account": "account.",
+    "system": "system.",
+    "webhook": "webhook.",
+    "external": "external.",
 }

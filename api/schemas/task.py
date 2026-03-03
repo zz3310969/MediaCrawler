@@ -51,6 +51,7 @@ class TaskConfig(BaseModel):
     crawl_interval: float = 1.0                         # 请求间隔（秒）
     
     # 登录配置
+    account_id: Optional[str] = None                    # 关联的账号 ID（从账号管理中选择）
     login_type: Optional[str] = "cookie"                # cookie/qrcode
     cookies: Optional[str] = None                       # Cookie 字符串
     

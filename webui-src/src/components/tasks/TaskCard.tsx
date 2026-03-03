@@ -1,3 +1,4 @@
+import { useNavigate } from 'react-router-dom';
 import { Play, Pause, RotateCcw, Trash2, AlertCircle, Clock } from 'lucide-react';
 import { Badge, Progress } from '../common';
 import type { Task } from '../../types/task';
@@ -10,12 +11,21 @@ interface TaskCardProps {
 }
 
 export function TaskCard({ task, onAction }: TaskCardProps) {
+  const navigate = useNavigate();
   const platform = PLATFORMS.find((p) => p.id === task.platform);
   const statusConfig = TASK_STATUS_CONFIG[task.status];
   const keywords = task.config?.keywords || [];
 
+  const handleCardClick = (e: React.MouseEvent) => {
+    if ((e.target as HTMLElement).closest('button')) return;
+    navigate(`/tasks/${task.task_id}`);
+  };
+
   return (
-    <div className="bg-white rounded-lg border border-border p-5 space-y-4 hover:shadow-card-hover transition-shadow">
+    <div
+      onClick={handleCardClick}
+      className="bg-white rounded-lg border border-border p-5 space-y-4 hover:shadow-card-hover transition-shadow cursor-pointer"
+    >
       {/* 头部 */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">

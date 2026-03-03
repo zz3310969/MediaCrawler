@@ -136,6 +136,16 @@ class BilibiliCrawler(AbstractCrawler):
                 await login_obj.begin()
                 await self.bili_client.update_cookies(browser_context=self.browser_context)
 
+                current_cookie = await self.browser_context.cookies()
+                cookie_str_out, _ = utils.convert_cookies(current_cookie)
+                if cookie_str_out:
+                    print(f"[COOKIE_UPDATE] {cookie_str_out}")
+
+            login_only = getattr(config, 'LOGIN_ONLY', False)
+            if login_only:
+                utils.logger.info("[BilibiliCrawler] Login only mode - skipping crawling")
+                return
+
             crawler_type_var.set(config.CRAWLER_TYPE)
             if config.CRAWLER_TYPE == "search":
                 await self.search()

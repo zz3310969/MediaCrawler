@@ -5,6 +5,7 @@ import { Button } from '../components/common';
 import {
   StepsSidebar,
   Step1Platform,
+  StepAccount,
   Step2Config,
   Step3AntiDetect,
   Step3Proxy,
@@ -12,14 +13,16 @@ import {
 } from '../components/task-create';
 import { Platform, TaskConfig } from '../types';
 import { AntiDetectConfig } from '../api/antiDetect';
+import { toast } from '../components/ui/toast';
 import { tasksApi } from '../api/tasks';
 
 const STEPS = [
   { id: 1, title: '选择平台', description: '选择爬取目标' },
-  { id: 2, title: '配置参数', description: '设置爬取规则' },
-  { id: 3, title: '反爬增强', description: '配置反检测' },
-  { id: 4, title: '代理设置', description: '配置代理池' },
-  { id: 5, title: '确认执行', description: '检查并开始' },
+  { id: 2, title: '选择账号', description: '选择登录账号' },
+  { id: 3, title: '配置参数', description: '设置爬取规则' },
+  { id: 4, title: '反爬增强', description: '配置反检测' },
+  { id: 5, title: '代理设置', description: '配置代理池' },
+  { id: 6, title: '确认执行', description: '检查并开始' },
 ];
 
 interface ProxyConfig {
@@ -32,6 +35,7 @@ export function TaskCreate() {
   const navigate = useNavigate();
   const [currentStep, setCurrentStep] = useState(1);
   const [selectedPlatform, setSelectedPlatform] = useState<Platform | null>(null);
+  const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
 
   // 任务配置
   const [config, setConfig] = useState<Partial<TaskConfig>>({
@@ -74,7 +78,7 @@ export function TaskCreate() {
   };
 
   const handleNext = () => {
-    if (currentStep < 5) {
+    if (currentStep < 6) {
       setCurrentStep(currentStep + 1);
     }
   };
@@ -120,7 +124,8 @@ export function TaskCreate() {
         enable_media: config.enable_media || false,
         concurrency: config.concurrency || 3,
         crawl_interval: config.crawl_interval || 1.0,
-        login_type: 'qrcode' as const,
+        account_id: selectedAccountId || undefined,
+        login_type: 'cookie' as const,
         save_option: (config.save_option || 'json') as 'csv' | 'json' | 'excel' | 'db' | 'sqlite',
         enable_anti_detect: antiDetectEnabled,
         anti_detect_config: antiDetectEnabled ? antiDetectConfig : undefined,
@@ -141,8 +146,7 @@ export function TaskCreate() {
       navigate('/tasks');
     } catch (error) {
       console.error('Failed to create task:', error);
-      // TODO: 显示错误提示
-      alert('创建任务失败: ' + (error instanceof Error ? error.message : String(error)));
+      toast.error('创建任务失败: ' + (error instanceof Error ? error.message : String(error)));
     }
   };
 
@@ -150,7 +154,9 @@ export function TaskCreate() {
     switch (currentStep) {
       case 1:
         return selectedPlatform !== null;
-      case 2: {
+      case 2:
+        return true;
+      case 3: {
         if (!config.crawler_type || !config.max_notes) return false;
         const type = config.crawler_type;
         if (type === 'search') {
@@ -171,11 +177,11 @@ export function TaskCreate() {
         }
         return true;
       }
-      case 3:
-        return true;
       case 4:
         return true;
       case 5:
+        return true;
+      case 6:
         return true;
       default:
         return false;
@@ -235,9 +241,16 @@ export function TaskCreate() {
             />
           )}
           {currentStep === 2 && selectedPlatform && (
+            <StepAccount
+              platform={selectedPlatform}
+              selectedAccountId={selectedAccountId}
+              onSelect={setSelectedAccountId}
+            />
+          )}
+          {currentStep === 3 && selectedPlatform && (
             <Step2Config platform={selectedPlatform} config={config} onChange={handleConfigChange} />
           )}
-          {currentStep === 3 && (
+          {currentStep === 4 && (
             <Step3AntiDetect
               enabled={antiDetectEnabled}
               config={antiDetectConfig}
@@ -245,14 +258,15 @@ export function TaskCreate() {
               onConfigChange={setAntiDetectConfig}
             />
           )}
-          {currentStep === 4 && (
+          {currentStep === 5 && (
             <Step3Proxy config={proxyConfig} onChange={handleProxyConfigChange} />
           )}
-          {currentStep === 5 && (
+          {currentStep === 6 && (
             <Step4Confirm
               platform={selectedPlatform}
               config={config}
               proxyConfig={proxyConfig}
+              selectedAccountId={selectedAccountId}
               onEdit={setCurrentStep}
             />
           )}
@@ -266,7 +280,7 @@ export function TaskCreate() {
                 上一步
               </Button>
             )}
-            {currentStep < 5 ? (
+            {currentStep < 6 ? (
               <Button onClick={handleNext} disabled={!canProceed()}>
                 下一步
               </Button>

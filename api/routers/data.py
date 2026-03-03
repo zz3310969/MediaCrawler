@@ -236,32 +236,124 @@ async def get_data_stats():
     return stats
 
 
+@router.get("/export")
+async def export_task_data(
+    task_id: Optional[str] = None,
+    platform: Optional[str] = None,
+    format: str = "json",
+    limit: int = 1000,
+):
+    """
+    导出爬取数据（面向 AI Agent 的结构化数据导出）。
+    支持按 task_id、platform 过滤，支持 JSON/CSV 格式。
+    """
+    if format not in ("json", "csv"):
+        raise HTTPException(status_code=400, detail="Unsupported format. Use 'json' or 'csv'.")
+
+    if not DATA_DIR.exists():
+        if format == "csv":
+            from fastapi.responses import Response
+            return Response(content="", media_type="text/csv")
+        return {"data": [], "total": 0, "task_id": task_id, "platform": platform}
+
+    all_records = []
+    supported_extensions = {".json", ".csv"}
+
+    for root, dirs, filenames in os.walk(DATA_DIR):
+        root_path = Path(root)
+        for filename in filenames:
+            file_path = root_path / filename
+            if file_path.suffix.lower() not in supported_extensions:
+                continue
+
+            rel_path = str(file_path.relative_to(DATA_DIR))
+            if platform and platform.lower() not in rel_path.lower():
+                continue
+            if task_id and task_id not in rel_path:
+                continue
+
+            try:
+                if file_path.suffix == ".json":
+                    with open(file_path, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                        if isinstance(data, list):
+                            for item in data:
+                                item["_source_file"] = rel_path
+                            all_records.extend(data)
+                        elif isinstance(data, dict):
+                            data["_source_file"] = rel_path
+                            all_records.append(data)
+                elif file_path.suffix == ".csv":
+                    import csv
+                    with open(file_path, "r", encoding="utf-8") as f:
+                        reader = csv.DictReader(f)
+                        for row in reader:
+                            row["_source_file"] = rel_path
+                            all_records.append(row)
+            except Exception:
+                continue
+
+            if len(all_records) >= limit:
+                break
+        if len(all_records) >= limit:
+            break
+
+    all_records = all_records[:limit]
+
+    if format == "csv":
+        import csv
+        import io
+        from fastapi.responses import Response
+
+        if not all_records:
+            return Response(content="", media_type="text/csv")
+
+        all_keys = set()
+        for record in all_records:
+            all_keys.update(record.keys())
+        fieldnames = sorted(all_keys)
+
+        output = io.StringIO()
+        writer = csv.DictWriter(output, fieldnames=fieldnames, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(all_records)
+
+        return Response(
+            content=output.getvalue(),
+            media_type="text/csv",
+            headers={"Content-Disposition": "attachment; filename=export.csv"},
+        )
+
+    return {
+        "data": all_records,
+        "total": len(all_records),
+        "task_id": task_id,
+        "platform": platform,
+    }
+
+
 @router.get("/cos/check")
 async def check_cos_config():
-    """检查腾讯云COS配置状态"""
+    """检查腾讯云COS配置状态（使用全局 oss_uploader，自动从 WebUI 数据库加载配置）"""
     try:
-        from tools.oss_uploader import COSUploader
-        import config
-        
-        uploader = COSUploader()
-        
-        # 检查配置项
+        from tools.oss_uploader import oss_uploader
+
+        oss_uploader.reload()
+        await oss_uploader._ensure_db_config()
+
         config_items = {
-            "secret_id": uploader.secret_id,
-            "secret_key": uploader.secret_key,
-            "region": uploader.region,
-            "bucket_name": uploader.bucket_name,
-            "path_prefix": uploader.path_prefix,
+            "secret_id": oss_uploader.secret_id,
+            "secret_key": oss_uploader.secret_key,
+            "region": oss_uploader.region,
+            "bucket_name": oss_uploader.bucket_name,
+            "path_prefix": oss_uploader.path_prefix,
         }
-        
-        # 检查是否配置完整
-        is_configured = uploader.is_configured()
-        
-        # 配置状态详情
+
+        is_configured = oss_uploader.is_configured()
+
         config_status = {}
         for key, value in config_items.items():
             if key in ["secret_id", "secret_key"]:
-                # 隐藏敏感信息
                 if value:
                     config_status[key] = {
                         "configured": True,
@@ -269,72 +361,20 @@ async def check_cos_config():
                         "length": len(value)
                     }
                 else:
-                    config_status[key] = {
-                        "configured": False,
-                        "value": "",
-                        "error": "未配置"
-                    }
+                    config_status[key] = {"configured": False, "value": "", "error": "未配置"}
             else:
-                # 非敏感信息直接显示
-                config_status[key] = {
-                    "configured": bool(value),
-                    "value": value or "",
-                }
-        
-        # 如果配置完整，测试上传
-        upload_test_result = None
-        if is_configured:
-            try:
-                # 测试上传一个小文件
-                test_content = b"MediaCrawler COS Test"
-                test_filename = "test_connection.txt"
-                
-                url = await uploader.upload_bytes(
-                    test_content,
-                    test_filename,
-                    "text/plain"
-                )
-                
-                if url:
-                    upload_test_result = {
-                        "success": True,
-                        "message": "上传测试成功",
-                        "test_url": url
-                    }
-                else:
-                    upload_test_result = {
-                        "success": False,
-                        "message": "上传测试失败，但配置项完整"
-                    }
-            except Exception as e:
-                upload_test_result = {
-                    "success": False,
-                    "message": f"上传测试失败: {str(e)}",
-                    "error": str(e)
-                }
-        
-        # VIP海报保存模式
-        vip_poster_save_mode = getattr(config, 'VIP_POSTER_SAVE_MODE', 'local')
-        
+                config_status[key] = {"configured": bool(value), "value": value or ""}
+
+        save_mode = await oss_uploader.get_save_mode()
+
         return {
             "is_configured": is_configured,
             "config_status": config_status,
-            "upload_test": upload_test_result,
-            "vip_poster_save_mode": vip_poster_save_mode,
-            "message": "COS配置完整，可以正常使用" if is_configured else "COS配置不完整，请检查配置项",
-            "help": {
-                "doc_url": "docs/tencent_cos_config_guide.md",
-                "config_file": "config/weibo_config.py",
-                "env_vars": [
-                    "COS_SECRET_ID",
-                    "COS_SECRET_KEY",
-                    "COS_REGION",
-                    "COS_BUCKET_NAME",
-                    "COS_PATH_PREFIX"
-                ]
-            }
+            "save_mode": save_mode,
+            "config_source": "webui_db",
+            "message": "COS配置完整，可以正常使用" if is_configured else "COS配置不完整，请在「系统设置 → 外部服务」中配置",
         }
-    
+
     except ImportError as e:
         return {
             "is_configured": False,

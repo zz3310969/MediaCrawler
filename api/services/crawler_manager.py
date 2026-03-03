@@ -17,6 +17,7 @@
 # 使用本代码即表示您同意遵守上述原则和LICENSE中的所有条款。
 
 import asyncio
+import logging
 import subprocess
 import signal
 import os
@@ -25,6 +26,8 @@ from datetime import datetime
 from pathlib import Path
 
 from ..schemas import CrawlerStartRequest, LogEntry
+
+logger = logging.getLogger(__name__)
 
 
 class CrawlerManager:
@@ -219,6 +222,37 @@ class CrawlerManager:
             "qrcode_img": self.qrcode_img
         }
 
+    async def _save_account_from_cookies(self):
+        """登录成功后自动创建或更新账号"""
+        if not self.current_config or not self.new_cookies:
+            return
+        try:
+            from database.db_session import get_session
+            from api.schemas.account import AccountCreate, Platform, LoginMethod, AccountStatus
+            from api.services.crud.account import account_crud
+
+            platform = self.current_config.platform.value
+            login_type = self.current_config.login_type.value
+
+            async with get_session() as session:
+                account = await account_crud.create_account(
+                    session,
+                    obj_in=AccountCreate(
+                        platform=Platform(platform),
+                        login_method=LoginMethod(login_type),
+                        cookies=self.new_cookies,
+                    )
+                )
+                logger.info(f"[CrawlerManager] Account created: {platform} - {account.account_id}")
+                entry = self._create_log_entry(
+                    f"账号已自动保存 (ID: {account.account_id})", "success"
+                )
+                await self._push_log(entry)
+        except Exception as e:
+            logger.error(f"[CrawlerManager] Failed to save account: {e}")
+            entry = self._create_log_entry(f"账号保存失败: {e}", "error")
+            await self._push_log(entry)
+
     def _build_command(self, config: CrawlerStartRequest) -> list:
         """Build main.py command line arguments"""
         cmd = ["uv", "run", "python", "main.py"]
@@ -303,6 +337,9 @@ class CrawlerManager:
                             # Create a success log for display
                             entry = self._create_log_entry("Cookie retrieved successfully", "success")
                             await self._push_log(entry)
+                            # login_only 模式下自动创建/更新账号
+                            if self.current_config and self.current_config.login_only:
+                                await self._save_account_from_cookies()
                         # Check for token update
                         elif line.startswith("[TOKEN_UPDATE]"):
                             self.new_token = line.replace("[TOKEN_UPDATE]", "").strip()

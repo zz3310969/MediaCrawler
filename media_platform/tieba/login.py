@@ -102,12 +102,16 @@ class BaiduTieBaLogin(AbstractLogin):
                 utils.logger.info("[BaiduTieBaLogin.login_by_qrcode] login failed , have not found qrcode please check ....")
                 sys.exit()
 
+        # 输出二维码供 WebUI 捕获
+        print(f"[QRCODE_UPDATE] {base64_qrcode_img}")
+
         # show login qrcode
         # fix issue #12
         # we need to use partial function to call show_qrcode function and run in executor
         # then current asyncio event loop will not be blocked
-        partial_show_qrcode = functools.partial(utils.show_qrcode, base64_qrcode_img)
-        asyncio.get_running_loop().run_in_executor(executor=None, func=partial_show_qrcode)
+        if not getattr(config, 'LOGIN_ONLY', False):
+            partial_show_qrcode = functools.partial(utils.show_qrcode, base64_qrcode_img)
+            asyncio.get_running_loop().run_in_executor(executor=None, func=partial_show_qrcode)
 
         utils.logger.info(f"[BaiduTieBaLogin.login_by_qrcode] waiting for scan code login, remaining time is 120s")
         try:

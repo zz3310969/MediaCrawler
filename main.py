@@ -145,6 +145,10 @@ async def main() -> None:
             return
         print(f"[Main] ✓ 数据库连接验证成功")
 
+    # 校验可选依赖（如 COS SDK）
+    from tools.oss_uploader import check_cos_dependency
+    check_cos_dependency()
+
     # 初始化签名服务
     await _init_sign_server()
 

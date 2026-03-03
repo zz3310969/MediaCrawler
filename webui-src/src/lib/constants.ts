@@ -26,7 +26,7 @@ export const PLATFORMS: PlatformInfo[] = [
   {
     id: 'wb',
     name: '微博',
-    icon: '📰',
+    icon: '✍️',
     description: '社交媒体平台',
     color: '#EF4444',
   },
@@ -79,6 +79,12 @@ export const NAV_ITEMS: NavItem[] = [
     label: '数据管理',
     icon: 'FolderOpen',
     path: '/data',
+  },
+  {
+    id: 'schedules',
+    label: '定时调度',
+    icon: 'Clock',
+    path: '/schedules',
   },
   {
     id: 'proxy',

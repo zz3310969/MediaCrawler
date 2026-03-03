@@ -1,6 +1,8 @@
+import { useState, useEffect } from 'react';
 import { Settings, FileText, Shield } from 'lucide-react';
 import { Platform, TaskConfig } from '../../types';
 import { PLATFORMS, CRAWL_MODE_OPTIONS, PLATFORM_FIELDS } from '../../lib/constants';
+import { getAccount } from '../../api/accounts';
 
 interface ProxyConfig {
   use_proxy: boolean;
@@ -12,6 +14,7 @@ interface Step4ConfirmProps {
   platform: Platform | null;
   config: Partial<TaskConfig>;
   proxyConfig: ProxyConfig;
+  selectedAccountId: string | null;
   onEdit: (step: number) => void;
 }
 
@@ -44,9 +47,20 @@ function getPlatformExtraSummary(platform: Platform | null, config: Partial<Task
   return items;
 }
 
-export function Step4Confirm({ platform, config, proxyConfig, onEdit }: Step4ConfirmProps) {
+export function Step4Confirm({ platform, config, proxyConfig, selectedAccountId, onEdit }: Step4ConfirmProps) {
   const platformInfo = PLATFORMS.find((p) => p.id === platform);
   const crawlModeLabel = CRAWL_MODE_OPTIONS.find((o) => o.value === config.crawler_type)?.label;
+
+  const [accountName, setAccountName] = useState<string>('加载中...');
+  useEffect(() => {
+    if (!selectedAccountId) {
+      setAccountName('未选择（使用本地登录态）');
+      return;
+    }
+    getAccount(selectedAccountId)
+      .then((a) => setAccountName(a.nickname || a.username || selectedAccountId.slice(0, 8)))
+      .catch(() => setAccountName(selectedAccountId.slice(0, 8)));
+  }, [selectedAccountId]);
 
   const dataOptions = [];
   if (config.enable_comments) dataOptions.push('评论');
@@ -66,21 +80,17 @@ export function Step4Confirm({ platform, config, proxyConfig, onEdit }: Step4Con
         </p>
       </div>
 
-      <div className="grid grid-cols-3 gap-5">
-        {/* 平台信息 */}
+      <div className="grid grid-cols-2 gap-5">
+        {/* 平台 & 账号 */}
         <SummaryCard
           icon={<span className="text-2xl">{platformInfo?.icon}</span>}
           iconBgColor="bg-error-100"
-          title="目标平台"
+          title="平台与账号"
           onEdit={() => onEdit(1)}
         >
-          <div className="space-y-1">
-            <p className="text-base font-medium text-text-primary">
-              {platformInfo?.name}
-            </p>
-            <p className="text-sm text-text-secondary">
-              {platformInfo?.description}
-            </p>
+          <div className="space-y-3">
+            <SummaryItem label="目标平台" value={platformInfo?.name || '-'} />
+            <SummaryItem label="登录账号" value={accountName} />
           </div>
         </SummaryCard>
 
@@ -89,7 +99,7 @@ export function Step4Confirm({ platform, config, proxyConfig, onEdit }: Step4Con
           icon={<Settings className="w-5 h-5 text-primary" />}
           iconBgColor="bg-primary-100"
           title="爬取参数"
-          onEdit={() => onEdit(2)}
+          onEdit={() => onEdit(3)}
         >
           <div className="space-y-3">
             <SummaryItem label="采集模式" value={crawlModeLabel || '-'} />
@@ -115,7 +125,7 @@ export function Step4Confirm({ platform, config, proxyConfig, onEdit }: Step4Con
           icon={<Shield className="w-5 h-5 text-purple-500" />}
           iconBgColor="bg-purple-100"
           title="代理设置"
-          onEdit={() => onEdit(3)}
+          onEdit={() => onEdit(5)}
         >
           <div className="space-y-3">
             <SummaryItem

@@ -14,6 +14,8 @@ import {
 import { ProxyTable, AddProxyModal } from '../components/proxy';
 import { useProxies, useProxyStats, useCreateProxy, useDeleteProxy, useTestProxy } from '../hooks';
 import { Proxy } from '../types';
+import { toast } from '../components/ui/toast';
+import { confirm } from '../components/ui/confirm';
 
 export function ProxyManagement() {
   const [addModalOpen, setAddModalOpen] = useState(false);
@@ -52,14 +54,19 @@ export function ProxyManagement() {
   };
 
   const handleDeleteProxy = async (proxy: Proxy) => {
-    if (window.confirm(`确定要删除代理 ${proxy.ip}:${proxy.port} 吗？`)) {
-      try {
-        await deleteProxy(proxy.proxy_id);
-        refetchProxies();
-        refetchStats();
-      } catch (err) {
-        console.error('Delete proxy failed:', err);
-      }
+    const ok = await confirm({
+      title: '删除代理',
+      message: `确定要删除代理 ${proxy.ip}:${proxy.port} 吗？`,
+      confirmText: '删除',
+      variant: 'danger',
+    });
+    if (!ok) return;
+    try {
+      await deleteProxy(proxy.proxy_id);
+      refetchProxies();
+      refetchStats();
+    } catch (err) {
+      console.error('Delete proxy failed:', err);
     }
   };
 
@@ -67,9 +74,9 @@ export function ProxyManagement() {
     try {
       const result = await testProxy(proxy.proxy_id);
       if (result.success) {
-        alert(`测试成功！响应时间: ${result.response_time}ms`);
+        toast.success(`测试成功！响应时间: ${result.response_time}ms`);
       } else {
-        alert(`测试失败: ${result.error || '未知错误'}`);
+        toast.error(`测试失败: ${result.error || '未知错误'}`);
       }
       refetchProxies();
     } catch (err) {

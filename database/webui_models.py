@@ -170,3 +170,56 @@ class SystemConfig(Base):
     description = Column(Text, default='', comment='配置描述')
     created_at = Column(BigInteger, nullable=False, comment='创建时间戳')
     updated_at = Column(BigInteger, nullable=False, comment='更新时间戳')
+
+
+class ApiKeyModel(Base):
+    """API Key 表 - 供外部系统(AI Agent等)调用 API"""
+    __tablename__ = 'api_key'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    key_id = Column(String(64), nullable=False, unique=True, index=True, comment='Key唯一ID')
+    key_hash = Column(String(255), nullable=False, comment='Key哈希值')
+    key_prefix = Column(String(16), nullable=False, comment='Key前缀(mc_xxxx)用于识别')
+    name = Column(String(100), default='', comment='Key名称')
+    user_id = Column(String(64), default='', comment='关联用户ID')
+    scopes = Column(Text, default='[]', comment='权限范围JSON数组')
+    rate_limit = Column(Integer, default=60, comment='每分钟请求限制')
+    is_active = Column(Integer, default=1, index=True, comment='是否激活 0/1')
+    expires_at = Column(BigInteger, default=0, comment='过期时间戳(0=永不过期)')
+    last_used_at = Column(BigInteger, default=0, comment='最后使用时间戳')
+    created_at = Column(BigInteger, nullable=False, comment='创建时间戳')
+    updated_at = Column(BigInteger, nullable=False, comment='更新时间戳')
+
+
+class CrawlerSchedule(Base):
+    """定时调度表 - 管理周期性爬虫任务"""
+    __tablename__ = 'crawler_schedule'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    schedule_id = Column(String(64), nullable=False, unique=True, index=True, comment='调度唯一ID')
+    schedule_name = Column(String(200), nullable=False, comment='调度名称')
+    platform = Column(String(32), nullable=False, index=True, comment='平台标识')
+    crawler_type = Column(String(32), default='search', comment='爬取类型')
+    task_config = Column(Text, nullable=False, comment='任务配置JSON(TaskConfig)')
+
+    trigger_type = Column(String(20), nullable=False, comment='触发类型: cron/interval/once')
+    cron_expression = Column(String(100), default='', comment='Cron表达式')
+    interval_seconds = Column(Integer, default=0, comment='间隔秒数')
+    timezone = Column(String(50), default='Asia/Shanghai', comment='时区')
+
+    enabled = Column(Integer, default=1, index=True, comment='是否启用 0/1')
+    last_run_at = Column(BigInteger, default=0, comment='最后运行时间戳')
+    next_run_at = Column(BigInteger, default=0, comment='下次运行时间戳')
+    total_runs = Column(Integer, default=0, comment='总运行次数')
+
+    webhook_url = Column(String(500), default='', comment='Webhook回调URL')
+    webhook_secret = Column(String(100), default='', comment='Webhook HMAC密钥')
+
+    created_by = Column(String(64), default='', comment='创建者(user_id或api_key_id)')
+    created_at = Column(BigInteger, nullable=False, comment='创建时间戳')
+    updated_at = Column(BigInteger, nullable=False, comment='更新时间戳')
+
+    __table_args__ = (
+        Index('idx_schedule_platform', 'platform'),
+        Index('idx_schedule_enabled', 'enabled'),
+    )

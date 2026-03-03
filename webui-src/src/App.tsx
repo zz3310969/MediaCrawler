@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MainLayout } from './components/layout';
 import { ToastContainer } from './components/ui/toast';
+import { ConfirmContainer } from './components/ui/confirm';
 import {
   Dashboard,
   Tasks,
@@ -28,6 +29,7 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <ToastContainer />
+      <ConfirmContainer />
       <BrowserRouter>
         <Routes>
           {/* 登录页面 - 独立布局 */}

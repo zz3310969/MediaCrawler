@@ -47,6 +47,7 @@ from .routers import crawler_router, data_router, websocket_router, wechat_route
 from .routers.auth import router as auth_router
 from .routers.tasks import router as tasks_router
 from .routers.ws_tasks import router as ws_tasks_router, setup_event_subscriptions, cleanup_event_subscriptions
+from .services.webhook_subscriber import setup_webhook_subscriptions, cleanup_webhook_subscriptions
 from .routers.proxy import router as proxy_router
 from .routers.anti_detect import router as anti_detect_router
 # WebUI CRUD routers
@@ -54,9 +55,12 @@ from .routers.users import router as users_router
 from .routers.accounts import router as accounts_router
 from .routers.dashboard import router as dashboard_router
 from .routers.system_config import router as system_config_router
+from .routers.api_keys import router as api_keys_router
+from .routers.schedules import router as schedules_router
 from .middleware.session import SessionMiddleware
 from .services.factory import get_services, get_event_bus
 from .services.task_executor import TaskExecutor, CrawlerFunc, TaskContext
+from .services.scheduler import get_scheduler_service
 from .schemas.task import Task
 import config
 from database import db
@@ -212,6 +216,22 @@ async def lifespan(app: FastAPI):
         else:
             print(f"[API] ✓ 数据库连接验证成功")
     
+    # 校验可选依赖（如 COS SDK）
+    from tools.oss_uploader import check_cos_dependency
+    check_cos_dependency()
+
+    # 初始化 WebUI 数据库表（API Key、Schedule 等）
+    try:
+        from database.db_session import get_async_engine
+        from database.webui_models import Base as WebUIBase
+        engine = get_async_engine()
+        if engine:
+            async with engine.begin() as conn:
+                await conn.run_sync(WebUIBase.metadata.create_all)
+            print("[API] ✓ WebUI 数据库表初始化完成")
+    except Exception as e:
+        print(f"[API] ⚠️  WebUI 数据库表初始化失败: {e}")
+    
     # 初始化多任务服务
     print("[API] 正在初始化多任务服务...")
     try:
@@ -219,9 +239,18 @@ async def lifespan(app: FastAPI):
         event_bus = services["event_bus"]
         await event_bus.start()
         await setup_event_subscriptions()
+        await setup_webhook_subscriptions()
         print("[API] ✓ 多任务服务初始化完成")
     except Exception as e:
         print(f"[API] ⚠️  多任务服务初始化失败: {e}")
+    
+    # 启动定时调度服务
+    try:
+        scheduler_svc = get_scheduler_service()
+        await scheduler_svc.start()
+        print("[API] ✓ 定时调度服务已启动")
+    except Exception as e:
+        print(f"[API] ⚠️  定时调度服务启动失败: {e}")
     
     # 如果启用集成 Worker 模式，启动 TaskExecutor
     if integrated_worker:
@@ -272,8 +301,17 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             print(f"[API] ⚠️  集成 Worker 停止失败: {e}")
     
+    # 停止定时调度服务
+    try:
+        scheduler_svc = get_scheduler_service()
+        await scheduler_svc.stop()
+        print("[API] ✓ 定时调度服务已停止")
+    except Exception as e:
+        print(f"[API] ⚠️  定时调度服务停止失败: {e}")
+    
     # 清理多任务服务
     try:
+        await cleanup_webhook_subscriptions()
         await cleanup_event_subscriptions()
         event_bus = get_event_bus()
         await event_bus.stop()
@@ -333,6 +371,8 @@ app.include_router(users_router)          # /api/users
 app.include_router(accounts_router)       # /api/accounts
 app.include_router(dashboard_router)      # /api/dashboard
 app.include_router(system_config_router)  # /api/config
+app.include_router(api_keys_router)       # /api/api-keys
+app.include_router(schedules_router)      # /api/schedules
 
 
 @app.get("/")

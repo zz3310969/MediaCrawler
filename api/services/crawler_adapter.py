@@ -372,12 +372,39 @@ asyncio.run(run())
         
         items_crawled = 0
         error_message = None
+        last_output_time = asyncio.get_event_loop().time()
+        no_output_timeout = 300  # 5 分钟无输出视为卡住
         
         # 读取输出并更新进度
         try:
-            async for line in self._read_process_output():
-                # 检查取消
-                self.ctx.check_cancelled()
+            while True:
+                try:
+                    line_bytes = await asyncio.wait_for(
+                        self.process.stdout.readline(),
+                        timeout=30.0
+                    )
+                except asyncio.TimeoutError:
+                    self.ctx.check_cancelled()
+                    elapsed = asyncio.get_event_loop().time() - last_output_time
+                    if elapsed > no_output_timeout:
+                        await self.ctx.error(f"爬虫进程超过 {no_output_timeout} 秒无输出，可能卡在登录环节，正在终止")
+                        await self._terminate_process()
+                        return {
+                            "success": False,
+                            "items_crawled": items_crawled,
+                            "error": "爬虫进程无响应（可能需要配置有效的 Cookie 或登录状态）",
+                        }
+                    continue
+
+                if not line_bytes:
+                    break
+
+                try:
+                    line = line_bytes.decode("utf-8", errors="replace").rstrip()
+                except Exception:
+                    continue
+
+                last_output_time = asyncio.get_event_loop().time()
                 
                 # 解析日志行
                 parsed = self._parse_log_line(line)
@@ -408,7 +435,12 @@ asyncio.run(run())
             raise
         
         # 等待进程结束
-        return_code = await self.process.wait()
+        try:
+            return_code = await asyncio.wait_for(self.process.wait(), timeout=30.0)
+        except asyncio.TimeoutError:
+            await self.ctx.error("等待进程退出超时，强制终止")
+            await self._terminate_process()
+            return_code = -1
         
         if return_code == 0:
             await self.ctx.info("爬虫任务执行完成")
@@ -425,17 +457,6 @@ asyncio.run(run())
                 "items_crawled": items_crawled,
                 "error": error_message,
             }
-    
-    async def _read_process_output(self):
-        """异步读取进程输出"""
-        while True:
-            line = await self.process.stdout.readline()
-            if not line:
-                break
-            try:
-                yield line.decode("utf-8", errors="replace").rstrip()
-            except Exception:
-                continue
     
     def _parse_log_line(self, line: str) -> Dict[str, str]:
         """解析日志行"""

@@ -1,7 +1,10 @@
 export { Dashboard } from './Dashboard';
 export { Tasks } from './Tasks';
 export { TaskCreate } from './TaskCreate';
+export { TaskDetail } from './TaskDetail';
 export { DataManagement } from './DataManagement';
 export { AccountManagement } from './AccountManagement';
 export { ProxyManagement } from './ProxyManagement';
+export { ScheduleManagement } from './ScheduleManagement';
 export { Login } from './Login';
+export { Settings } from './Settings';

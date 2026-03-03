@@ -81,10 +81,12 @@ class TaskManager:
             DuplicateTaskError: 幂等键重复
             PermissionDeniedError: 会话无效
         """
-        # 1. 验证会话
-        session = await self._session_store.get(session_id)
-        if not session:
-            raise PermissionDeniedError("Invalid session")
+        # 1. 验证会话（API Key 认证使用合成 session_id: "apikey:xxx"）
+        is_api_key = session_id.startswith("apikey:")
+        if not is_api_key:
+            session = await self._session_store.get(session_id)
+            if not session:
+                raise PermissionDeniedError("Invalid session")
         
         # 2. 幂等键检查
         if request.idempotency_key:
@@ -95,42 +97,72 @@ class TaskManager:
                 logger.info(f"Duplicate task with idempotency key: {request.idempotency_key}")
                 return existing
         
-        # 3. 配额检查：每日任务数
-        if not await self._session_store.increment_daily_tasks(session_id):
-            raise QuotaExceededError("Daily task limit exceeded")
+        # 3. 配额检查：每日任务数（API Key 跳过配额检查）
+        if not is_api_key:
+            if not await self._session_store.increment_daily_tasks(session_id):
+                raise QuotaExceededError("Daily task limit exceeded")
         
         # 4. 配额检查：并发任务数
-        running_count = await self._get_running_count(session_id)
-        if running_count >= session.quota.max_concurrent_tasks:
-            raise QuotaExceededError("Concurrent task limit exceeded")
+        if not is_api_key:
+            running_count = await self._get_running_count(session_id)
+            if running_count >= session.quota.max_concurrent_tasks:
+                raise QuotaExceededError("Concurrent task limit exceeded")
         
-        # 5. 创建任务对象
+        # 5. 如果指定了 account_id，从数据库查询 Cookie 写入配置
+        if request.config.account_id and not request.config.cookies:
+            try:
+                from database.db_session import get_session as get_db_session
+                from api.services.crud.account import account_crud
+
+                async with get_db_session() as db_session:
+                    account = await account_crud.get_by_account_id(
+                        db_session, request.config.account_id
+                    )
+                    if not account:
+                        raise TaskManagerError(
+                            f"账号不存在: {request.config.account_id}"
+                        )
+                    if account.platform != request.config.platform:
+                        raise TaskManagerError(
+                            f"账号平台({account.platform})与任务平台({request.config.platform})不匹配"
+                        )
+                    if not account.cookies:
+                        raise TaskManagerError(
+                            f"账号 {account.nickname or account.username or account.account_id} 没有可用的 Cookie"
+                        )
+                    request.config.cookies = account.cookies
+                    request.config.login_type = "cookie"
+            except TaskManagerError:
+                raise
+            except Exception as e:
+                logger.warning(f"查询账号 Cookie 失败: {e}，任务将尝试使用本地登录态")
+
+        # 6. 创建任务对象
         task = Task(
             session_id=session_id,
             task_name=request.task_name,
-            platform=request.config.platform,  # 冗余存储便于查询
-            crawler_type=request.config.crawler_type,  # 冗余存储便于查询
+            platform=request.config.platform,
+            crawler_type=request.config.crawler_type,
             config=request.config,
             priority=request.priority,
             scheduled_at=request.scheduled_at,
             idempotency_key=request.idempotency_key
         )
         
-        # 6. 持久化
+        # 7. 持久化
         try:
             await self._storage.create(task)
         except ValueError as e:
             raise DuplicateTaskError(str(e))
         
-        # 7. 入队
+        # 8. 入队
         if request.scheduled_at and request.scheduled_at > datetime.utcnow():
-            # 延迟任务
             delay = (request.scheduled_at - datetime.utcnow()).total_seconds()
             await self._queue.enqueue_delayed(task, int(delay))
         else:
             await self._queue.enqueue(task, task.priority)
         
-        # 8. 发布事件
+        # 9. 发布事件
         await self._event_bus.publish(TaskEvent(
             event_type=EventType.TASK_CREATED,
             task_id=task.task_id,

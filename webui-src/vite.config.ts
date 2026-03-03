@@ -13,11 +13,13 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      // 开发模式：代理 API 和 WebSocket 请求到后端
       '/api': {
         target: 'http://127.0.0.1:8080',
         changeOrigin: true,
-        ws: true,  // 支持 WebSocket
+      },
+      '/ws': {
+        target: 'ws://127.0.0.1:8080',
+        ws: true,
       },
     },
   },

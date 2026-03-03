@@ -91,7 +91,7 @@ class AccountCRUD(CRUDBase[CrawlerAccount, AccountCreate, AccountUpdate]):
             "login_method": obj_in.login_method.value if isinstance(obj_in.login_method, LoginMethod) else obj_in.login_method,
             "cookies": obj_in.cookies or "",
             "cookie_valid": 1 if obj_in.cookies else 0,
-            "status": AccountStatus.PENDING.value,
+            "status": AccountStatus.ACTIVE.value if obj_in.cookies else AccountStatus.PENDING.value,
             "remark": obj_in.remark or "",
             "created_at": now,
             "updated_at": now,

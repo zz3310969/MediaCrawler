@@ -2,14 +2,17 @@ import { useState, useMemo } from 'react';
 import { Plus, Loader2 } from 'lucide-react';
 import { PageHeader } from '../components/layout';
 import { StatCard, Button, PlatformTabs } from '../components/common';
-import { AccountTable, AddAccountModal, QRLoginModal } from '../components/accounts';
+import { AccountTable, AddAccountModal, EditAccountModal, QRLoginModal } from '../components/accounts';
 import { Account, Platform, LoginMethod } from '../types';
-import { useAccounts, useDeleteAccount, useValidateAccount } from '../hooks';
+import { useAccounts, useDeleteAccount } from '../hooks';
+import { confirm } from '../components/ui/confirm';
 
 export function AccountManagement() {
   const [activePlatform, setActivePlatform] = useState<Platform | 'all'>('all');
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [qrModalOpen, setQrModalOpen] = useState(false);
+  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [editingAccount, setEditingAccount] = useState<Account | null>(null);
   const [selectedPlatform, setSelectedPlatform] = useState<Platform | null>(null);
 
   // 获取账号列表
@@ -19,9 +22,7 @@ export function AccountManagement() {
     page_size: 100,
   });
 
-  // 账号操作
   const { mutate: deleteAccount } = useDeleteAccount();
-  const { mutate: validateAccount } = useValidateAccount();
 
   const accounts = accountsData?.items || [];
 
@@ -52,32 +53,23 @@ export function AccountManagement() {
   };
 
   const handleEdit = (account: Account) => {
-    console.log('Edit account:', account);
-    // TODO: 打开编辑弹窗
+    setEditingAccount(account);
+    setEditModalOpen(true);
   };
 
   const handleDelete = async (account: Account) => {
-    if (window.confirm(`确定要删除账号 ${account.nickname || account.username} 吗？`)) {
-      try {
-        await deleteAccount(account.account_id);
-        refetch();
-      } catch (err) {
-        console.error('Delete account failed:', err);
-      }
-    }
-  };
-
-  const handleRelogin = (account: Account) => {
-    setSelectedPlatform(account.platform);
-    setQrModalOpen(true);
-  };
-
-  const handleVerify = async (account: Account) => {
+    const ok = await confirm({
+      title: '删除账号',
+      message: `确定要删除账号「${account.nickname || account.username}」吗？删除后不可恢复。`,
+      confirmText: '删除',
+      variant: 'danger',
+    });
+    if (!ok) return;
     try {
-      await validateAccount(account.account_id);
+      await deleteAccount(account.account_id);
       refetch();
     } catch (err) {
-      console.error('Validate account failed:', err);
+      console.error('Delete account failed:', err);
     }
   };
 
@@ -162,8 +154,6 @@ export function AccountManagement() {
             accounts={accounts}
             onEdit={handleEdit}
             onDelete={handleDelete}
-            onRelogin={handleRelogin}
-            onVerify={handleVerify}
           />
         ) : (
           <div className="flex flex-col items-center justify-center py-16 text-center bg-white rounded-lg border border-border">
@@ -181,6 +171,17 @@ export function AccountManagement() {
         open={addModalOpen}
         onClose={() => setAddModalOpen(false)}
         onSubmit={handleAddAccount}
+      />
+
+      {/* 编辑账号弹窗 */}
+      <EditAccountModal
+        open={editModalOpen}
+        onClose={() => {
+          setEditModalOpen(false);
+          setEditingAccount(null);
+        }}
+        account={editingAccount}
+        onSuccess={() => refetch()}
       />
 
       {/* 扫码登录弹窗 */}

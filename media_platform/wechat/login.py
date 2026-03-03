@@ -124,10 +124,10 @@ class WeChatLogin(AbstractLogin):
                 utils.logger.error("[WeChatLogin.login_by_qrcode] Failed to get QR code image")
                 sys.exit()
             
-            # 显示二维码
-            partial_show_qrcode = functools.partial(utils.show_qrcode, base64_qrcode_img)
-            asyncio.get_running_loop().run_in_executor(executor=None, func=partial_show_qrcode)
-            
+            if not getattr(config, 'LOGIN_ONLY', False):
+                partial_show_qrcode = functools.partial(utils.show_qrcode, base64_qrcode_img)
+                asyncio.get_running_loop().run_in_executor(executor=None, func=partial_show_qrcode)
+
             # 打印二维码供 WebUI 捕获
             print(f"[QRCODE_UPDATE] {base64_qrcode_img}")
             
@@ -370,9 +370,9 @@ class WeChatAPILogin:
         # 转为 base64
         base64_img = base64.b64encode(img_data).decode('utf-8')
         
-        # 显示二维码
-        partial_show_qrcode = functools.partial(utils.show_qrcode, base64_img)
-        asyncio.get_running_loop().run_in_executor(executor=None, func=partial_show_qrcode)
+        if not getattr(config, 'LOGIN_ONLY', False):
+            partial_show_qrcode = functools.partial(utils.show_qrcode, base64_img)
+            asyncio.get_running_loop().run_in_executor(executor=None, func=partial_show_qrcode)
         
         # 打印供 WebUI 捕获
         print(f"[QRCODE_UPDATE] {base64_img}")

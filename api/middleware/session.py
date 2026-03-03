@@ -1,6 +1,7 @@
 """
-Session 中间件
+Session 中间件 - 支持 Session + API Key 双重认证
 """
+import json
 import logging
 from typing import Optional
 from contextvars import ContextVar
@@ -14,9 +15,11 @@ from api.schemas.session import Session
 
 logger = logging.getLogger(__name__)
 
-# 使用 ContextVar 存储当前请求的 session
+# 使用 ContextVar 存储当前请求的 session / api_key 信息
 _current_session: ContextVar[Optional[Session]] = ContextVar("current_session", default=None)
 _current_session_id: ContextVar[Optional[str]] = ContextVar("current_session_id", default=None)
+_current_api_key_id: ContextVar[Optional[str]] = ContextVar("current_api_key_id", default=None)
+_current_api_key_scopes: ContextVar[Optional[list]] = ContextVar("current_api_key_scopes", default=None)
 
 
 def get_current_session() -> Optional[Session]:
@@ -29,10 +32,25 @@ def get_session_id() -> Optional[str]:
     return _current_session_id.get()
 
 
+def get_api_key_id() -> Optional[str]:
+    """获取当前请求的 API Key ID"""
+    return _current_api_key_id.get()
+
+
+def get_api_key_scopes() -> Optional[list]:
+    """获取当前请求的 API Key 权限范围"""
+    return _current_api_key_scopes.get()
+
+
+def is_api_key_request() -> bool:
+    """判断当前请求是否通过 API Key 认证"""
+    return _current_api_key_id.get() is not None
+
+
 class SessionMiddleware(BaseHTTPMiddleware):
-    """Session 中间件"""
+    """Session + API Key 认证中间件"""
     
-    # 不需要 session 的路径（精确匹配）
+    # 不需要认证的路径（精确匹配）
     EXCLUDED_PATHS = {
         "/",
         "/docs",
@@ -43,7 +61,7 @@ class SessionMiddleware(BaseHTTPMiddleware):
         "/health",
     }
     
-    # 路径前缀排除（这些路径不需要 session 认证）
+    # 路径前缀排除（这些路径不需要认证）
     EXCLUDED_PREFIXES = [
         "/static/",
         "/assets/",
@@ -70,28 +88,31 @@ class SessionMiddleware(BaseHTTPMiddleware):
         if self._should_skip(path):
             return await call_next(request)
         
-        # 获取 session_id
+        # 优先检查 API Key (Bearer token)
+        api_key_token = self._extract_bearer_token(request)
+        if api_key_token and api_key_token.startswith("mc_"):
+            auth_result = await self._authenticate_api_key(api_key_token, request, call_next)
+            if auth_result is not None:
+                return auth_result
+
+        # 然后检查 Session
         session_id = self._extract_session_id(request)
         
         if session_id:
-            # 验证 session
             session_store = get_session_store()
             session = await session_store.get(session_id)
             
             if session and session.is_valid():
-                # 刷新活跃时间
                 await session_store.refresh(session_id)
                 
-                # 设置 context
                 _current_session.set(session)
                 _current_session_id.set(session_id)
                 
-                # 继续处理请求
-                response = await call_next(request)
-                
-                # 清理 context
-                _current_session.set(None)
-                _current_session_id.set(None)
+                try:
+                    response = await call_next(request)
+                finally:
+                    _current_session.set(None)
+                    _current_session_id.set(None)
                 
                 return response
         
@@ -99,38 +120,76 @@ class SessionMiddleware(BaseHTTPMiddleware):
         if path.startswith("/api/") and not self._should_skip(path):
             return JSONResponse(
                 status_code=401,
-                content={"detail": "Invalid or missing session"}
+                content={"detail": "Invalid or missing session. Use Session ID or API Key (Authorization: Bearer mc_xxx)."}
             )
         
         # 对于其他路径，继续处理
         return await call_next(request)
     
+    async def _authenticate_api_key(self, raw_key: str, request: Request, call_next):
+        """通过 API Key 认证请求"""
+        try:
+            from database.db_session import get_session as get_db_session
+            from api.services.crud.api_key import api_key_crud
+
+            async with get_db_session() as db_session:
+                if db_session is None:
+                    return None
+
+                key_model = await api_key_crud.verify_key(db_session, raw_key)
+                if not key_model:
+                    return JSONResponse(
+                        status_code=401,
+                        content={"detail": "Invalid or expired API Key"}
+                    )
+
+                scopes = json.loads(key_model.scopes) if key_model.scopes else []
+
+                _current_api_key_id.set(key_model.key_id)
+                _current_api_key_scopes.set(scopes)
+                _current_session_id.set(f"apikey:{key_model.key_id}")
+
+                try:
+                    response = await call_next(request)
+                finally:
+                    _current_api_key_id.set(None)
+                    _current_api_key_scopes.set(None)
+                    _current_session_id.set(None)
+
+                return response
+
+        except Exception as e:
+            logger.warning(f"API Key authentication failed: {e}")
+            return None
+
     def _should_skip(self, path: str) -> bool:
         """检查是否应该跳过验证"""
-        # 精确匹配
         if path in self.EXCLUDED_PATHS:
             return True
         
-        # 前缀匹配
         for prefix in self.EXCLUDED_PREFIXES:
             if path.startswith(prefix):
                 return True
         
         return False
     
+    def _extract_bearer_token(self, request: Request) -> Optional[str]:
+        """从 Authorization header 提取 Bearer token"""
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            return auth_header[7:].strip()
+        return None
+    
     def _extract_session_id(self, request: Request) -> Optional[str]:
         """从请求中提取 session_id"""
-        # 1. 从 Header 获取
         session_id = request.headers.get("X-Session-ID")
         if session_id:
             return session_id
         
-        # 2. 从 Cookie 获取
         session_id = request.cookies.get("session_id")
         if session_id:
             return session_id
         
-        # 3. 从 Query 参数获取（用于 WebSocket）
         session_id = request.query_params.get("session_id")
         if session_id:
             return session_id
@@ -141,14 +200,7 @@ class SessionMiddleware(BaseHTTPMiddleware):
 # ========== FastAPI 依赖项 ==========
 
 async def require_session(request: Request) -> Session:
-    """
-    要求有效的 Session（FastAPI 依赖项）
-    
-    Usage:
-        @app.get("/api/tasks")
-        async def list_tasks(session: Session = Depends(require_session)):
-            ...
-    """
+    """要求有效的 Session（FastAPI 依赖项）"""
     session = get_current_session()
     if not session:
         raise HTTPException(status_code=401, detail="Session required")
@@ -156,18 +208,32 @@ async def require_session(request: Request) -> Session:
 
 
 async def require_session_id(request: Request) -> str:
-    """
-    要求有效的 Session ID（FastAPI 依赖项）
-    """
+    """要求有效的 Session ID（FastAPI 依赖项），支持 Session 和 API Key"""
     session_id = get_session_id()
     if not session_id:
-        raise HTTPException(status_code=401, detail="Session required")
+        raise HTTPException(status_code=401, detail="Authentication required (Session or API Key)")
     return session_id
 
 
+async def require_api_key_scope(scope: str):
+    """生成检查 API Key scope 的依赖"""
+    async def checker(request: Request) -> str:
+        key_id = get_api_key_id()
+        if key_id:
+            scopes = get_api_key_scopes() or []
+            from api.schemas.api_key import ApiKey
+            dummy = ApiKey(key_id=key_id, key_hash="", key_prefix="", scopes=scopes)
+            if not dummy.has_scope(scope):
+                raise HTTPException(status_code=403, detail=f"Missing required scope: {scope}")
+            return get_session_id()
+        session_id = get_session_id()
+        if not session_id:
+            raise HTTPException(status_code=401, detail="Authentication required")
+        return session_id
+    return checker
+
+
 async def optional_session(request: Request) -> Optional[Session]:
-    """
-    可选的 Session（FastAPI 依赖项）
-    """
+    """可选的 Session（FastAPI 依赖项）"""
     return get_current_session()
 

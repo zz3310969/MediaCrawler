@@ -111,9 +111,32 @@ class WeiboCrawler(AbstractCrawler):
 
 
             self.context_page = await self.browser_context.new_page()
+
+            login_only = getattr(config, 'LOGIN_ONLY', False)
+
+            if login_only:
+                # login_only 模式: 跳过首页访问和客户端初始化, 直接登录
+                login_obj = WeiboLogin(
+                    login_type=config.LOGIN_TYPE,
+                    login_phone="",
+                    browser_context=self.browser_context,
+                    context_page=self.context_page,
+                    cookie_str="",
+                )
+                await login_obj.begin()
+
+                await self.context_page.goto(self.mobile_index_url)
+                await asyncio.sleep(2)
+                current_cookie = await self.browser_context.cookies()
+                cookie_str_out, _ = utils.convert_cookies(current_cookie)
+                if cookie_str_out:
+                    print(f"[COOKIE_UPDATE] {cookie_str_out}")
+
+                utils.logger.info("[WeiboCrawler] Login only mode - cookies captured successfully!")
+                return
+
             await self.context_page.goto(self.index_url)
             await asyncio.sleep(2)
-
 
             # Create a client to interact with the weibo website.
             self.wb_client = await self.create_weibo_client(httpx_proxy_format)

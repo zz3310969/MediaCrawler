@@ -3,6 +3,7 @@
 系统配置管理路由
 提供系统配置的CRUD接口
 """
+import json
 import logging
 from typing import Optional, Dict, Any, List
 
@@ -10,7 +11,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from database.db_session import get_session
-from api.services.crud.system_config import system_config_crud, ConfigKeys, DEFAULT_CONFIGS
+from api.services.crud.system_config import system_config_crud, ConfigKeys, DEFAULT_CONFIGS, CONFIG_TYPE_MAP
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +83,6 @@ async def list_configs(
         
         items = []
         for config in configs:
-            import json
             try:
                 value = json.loads(config.config_value)
             except json.JSONDecodeError:
@@ -198,120 +198,177 @@ async def get_all_configs_dict():
         return configs
 
 
-# ==================== 预定义配置组 ====================
+# ==================== 按分组的配置接口 ====================
 
-@router.get("/proxy", summary="获取代理配置")
-async def get_proxy_configs():
-    """
-    获取代理相关配置
-    """
+def _defaults_for_type(config_type: str) -> Dict[str, Any]:
+    """根据 config_type 返回对应的默认值子集"""
+    prefix = CONFIG_TYPE_MAP.get(config_type, f"{config_type}.")
+    return {k: v for k, v in DEFAULT_CONFIGS.items() if k.startswith(prefix)}
+
+
+async def _get_group_configs(config_type: str) -> Dict[str, Any]:
     async with get_session() as session:
-        configs = await system_config_crud.get_configs_as_dict(session, "proxy")
-        
-        # 填充默认值
-        defaults = {
-            ConfigKeys.PROXY_ENABLE: True,
-            ConfigKeys.PROXY_POOL_SIZE: 5,
-            ConfigKeys.PROXY_VALIDATE_TIMEOUT: 10,
-            ConfigKeys.PROXY_BINDING_STICKY: True,
-            ConfigKeys.PROXY_AUTO_REBIND: True,
-        }
-        
-        for key, default in defaults.items():
+        configs = await system_config_crud.get_configs_as_dict(session, config_type)
+        for key, default in _defaults_for_type(config_type).items():
             if key not in configs:
                 configs[key] = default
-        
         return configs
 
 
-@router.put("/proxy", summary="更新代理配置")
-async def update_proxy_configs(configs: Dict[str, Any]):
-    """
-    更新代理相关配置
-    """
+async def _update_group_configs(config_type: str, configs: Dict[str, Any]) -> dict:
     async with get_session() as session:
         await system_config_crud.batch_set_values(
-            session,
-            configs=configs,
-            config_type="proxy"
+            session, configs=configs, config_type=config_type
         )
-        
-        return {"message": "代理配置已更新"}
+        return {"message": f"{config_type} 配置已更新"}
 
+
+# -- 爬虫默认设置 (Tab1) --
 
 @router.get("/crawler", summary="获取爬虫配置")
 async def get_crawler_configs():
-    """
-    获取爬虫相关配置
-    """
-    async with get_session() as session:
-        configs = await system_config_crud.get_configs_as_dict(session, "crawler")
-        
-        # 填充默认值
-        defaults = {
-            ConfigKeys.CRAWLER_CONCURRENCY: 3,
-            ConfigKeys.CRAWLER_REQUEST_INTERVAL: 1.0,
-            ConfigKeys.CRAWLER_MAX_RETRIES: 3,
-            ConfigKeys.CRAWLER_TIMEOUT: 30,
-        }
-        
-        for key, default in defaults.items():
-            if key not in configs:
-                configs[key] = default
-        
-        return configs
+    return await _get_group_configs("crawler")
 
 
 @router.put("/crawler", summary="更新爬虫配置")
 async def update_crawler_configs(configs: Dict[str, Any]):
-    """
-    更新爬虫相关配置
-    """
-    async with get_session() as session:
-        await system_config_crud.batch_set_values(
-            session,
-            configs=configs,
-            config_type="crawler"
-        )
-        
-        return {"message": "爬虫配置已更新"}
+    return await _update_group_configs("crawler", configs)
 
+
+# -- 浏览器与反检测 (Tab2) --
+
+@router.get("/browser", summary="获取浏览器配置")
+async def get_browser_configs():
+    return await _get_group_configs("browser")
+
+
+@router.put("/browser", summary="更新浏览器配置")
+async def update_browser_configs(configs: Dict[str, Any]):
+    return await _update_group_configs("browser", configs)
+
+
+# -- 代理池设置 (Tab3) --
+
+@router.get("/proxy", summary="获取代理配置")
+async def get_proxy_configs():
+    return await _get_group_configs("proxy")
+
+
+@router.put("/proxy", summary="更新代理配置")
+async def update_proxy_configs(configs: Dict[str, Any]):
+    return await _update_group_configs("proxy", configs)
+
+
+# -- 多账号策略 (Tab4) --
+
+@router.get("/account", summary="获取多账号配置")
+async def get_account_configs():
+    return await _get_group_configs("account")
+
+
+@router.put("/account", summary="更新多账号配置")
+async def update_account_configs(configs: Dict[str, Any]):
+    return await _update_group_configs("account", configs)
+
+
+# -- 系统运维 (Tab5) --
 
 @router.get("/system", summary="获取系统配置")
 async def get_system_configs():
-    """
-    获取系统相关配置
-    """
-    async with get_session() as session:
-        configs = await system_config_crud.get_configs_as_dict(session, "system")
-        
-        # 填充默认值
-        defaults = {
-            ConfigKeys.SYSTEM_LOG_LEVEL: "INFO",
-            ConfigKeys.SYSTEM_DATA_RETENTION_DAYS: 30,
-            ConfigKeys.SYSTEM_MAINTENANCE_MODE: False,
-        }
-        
-        for key, default in defaults.items():
-            if key not in configs:
-                configs[key] = default
-        
-        return configs
+    return await _get_group_configs("system")
 
 
 @router.put("/system", summary="更新系统配置")
 async def update_system_configs(configs: Dict[str, Any]):
+    return await _update_group_configs("system", configs)
+
+
+# -- Webhook 通知 (Tab6) --
+
+@router.get("/webhook", summary="获取Webhook配置")
+async def get_webhook_configs():
+    return await _get_group_configs("webhook")
+
+
+@router.put("/webhook", summary="更新Webhook配置")
+async def update_webhook_configs(configs: Dict[str, Any]):
+    return await _update_group_configs("webhook", configs)
+
+
+# -- 外部服务 (Tab7) --
+
+@router.get("/external", summary="获取外部服务配置")
+async def get_external_configs():
+    return await _get_group_configs("external")
+
+
+@router.put("/external", summary="更新外部服务配置")
+async def update_external_configs(configs: Dict[str, Any]):
+    result = await _update_group_configs("external", configs)
+    try:
+        from tools.oss_uploader import oss_uploader
+        oss_uploader.reload()
+    except Exception:
+        pass
+    return result
+
+
+# ==================== COS 连通性测试 ====================
+
+class CosTestRequest(BaseModel):
+    """COS 连通性测试请求（使用当前表单值，无需先保存）"""
+    secret_id: str = Field(..., description="SecretId")
+    secret_key: str = Field(..., description="SecretKey")
+    region: str = Field(..., description="地域")
+    bucket_name: str = Field(..., description="Bucket 名称")
+
+
+@router.post("/test-cos", summary="测试 COS 连通性")
+async def test_cos_connection(req: CosTestRequest):
     """
-    更新系统相关配置
+    使用提供的凭证测试腾讯云 COS 是否可连通。
+    会尝试调用 list_objects (MaxKeys=1) 验证权限和网络。
     """
-    async with get_session() as session:
-        await system_config_crud.batch_set_values(
-            session,
-            configs=configs,
-            config_type="system"
+    import importlib
+    if importlib.util.find_spec("qcloud_cos") is None:
+        raise HTTPException(
+            status_code=400,
+            detail="cos-python-sdk-v5 未安装，请运行: uv sync --extra cos"
         )
-        
-        return {"message": "系统配置已更新"}
+
+    if not all([req.secret_id, req.secret_key, req.region, req.bucket_name]):
+        raise HTTPException(status_code=400, detail="请填写完整的 COS 配置")
+
+    try:
+        from qcloud_cos import CosConfig, CosS3Client
+
+        cos_config = CosConfig(
+            Region=req.region,
+            SecretId=req.secret_id,
+            SecretKey=req.secret_key,
+        )
+        cos_client = CosS3Client(cos_config)
+
+        resp = cos_client.list_objects(Bucket=req.bucket_name, MaxKeys=1)
+        return {
+            "success": True,
+            "message": f"连接成功！Bucket「{req.bucket_name}」可正常访问",
+            "bucket": req.bucket_name,
+            "region": req.region,
+        }
+    except Exception as e:
+        error_msg = str(e)
+        if "NoSuchBucket" in error_msg:
+            detail = f"Bucket「{req.bucket_name}」不存在，请检查名称和地域"
+        elif "AccessDenied" in error_msg or "SignatureDoesNotMatch" in error_msg:
+            detail = "认证失败，请检查 SecretId 和 SecretKey 是否正确"
+        elif "could not be resolved" in error_msg or "ConnectionError" in error_msg:
+            detail = f"无法连接到 COS 服务（地域: {req.region}），请检查网络和地域配置"
+        else:
+            detail = f"连接失败: {error_msg}"
+
+        logger.warning(f"COS test failed: {error_msg}")
+        raise HTTPException(status_code=400, detail=detail)
 
 
 # ==================== 配置初始化 ====================

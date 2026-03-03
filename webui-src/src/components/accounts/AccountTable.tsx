@@ -7,11 +7,9 @@ interface AccountTableProps {
   accounts: Account[];
   onEdit: (account: Account) => void;
   onDelete: (account: Account) => void;
-  onRelogin: (account: Account) => void;
-  onVerify: (account: Account) => void;
 }
 
-export function AccountTable({ accounts, onEdit, onDelete, onRelogin, onVerify }: AccountTableProps) {
+export function AccountTable({ accounts, onEdit, onDelete }: AccountTableProps) {
   return (
     <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
       {/* 表头 */}
@@ -97,30 +95,12 @@ export function AccountTable({ accounts, onEdit, onDelete, onRelogin, onVerify }
 
             {/* 操作 */}
             <div className="w-[120px] flex items-center justify-center gap-2">
-              {isError && (
-                <button
-                  onClick={() => onRelogin(account)}
-                  className="px-3 h-7 rounded-md bg-primary text-white text-xs font-medium"
-                >
-                  重新登录
-                </button>
-              )}
-              {isPending && (
-                <button
-                  onClick={() => onVerify(account)}
-                  className="px-3 h-7 rounded-md bg-warning text-white text-xs font-medium"
-                >
-                  去验证
-                </button>
-              )}
-              {!isError && !isPending && (
-                <button
-                  onClick={() => onEdit(account)}
-                  className="w-8 h-8 flex items-center justify-center rounded-md border border-slate-200 hover:bg-slate-50 transition-colors"
-                >
-                  <Pencil className="w-4 h-4 text-text-secondary" />
-                </button>
-              )}
+              <button
+                onClick={() => onEdit(account)}
+                className="w-8 h-8 flex items-center justify-center rounded-md border border-slate-200 hover:bg-slate-50 transition-colors"
+              >
+                <Pencil className="w-4 h-4 text-text-secondary" />
+              </button>
               <button
                 onClick={() => onDelete(account)}
                 className="w-8 h-8 flex items-center justify-center rounded-md border border-error-200 hover:bg-error-50 transition-colors"
