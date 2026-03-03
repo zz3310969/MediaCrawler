@@ -57,7 +57,7 @@ ENABLE_WEIBO_FULL_TEXT = True
 ENABLE_VIP_POSTER_DOWNLOAD = True
 
 # Poster保存方式: "local" 保存到本地, "oss" 上传到阿里云OSS, "both" 同时保存
-VIP_POSTER_SAVE_MODE = "oss"
+VIP_POSTER_SAVE_MODE = "local"
 
 # ==================== 腾讯云 COS 配置 ====================
 import os

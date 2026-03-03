@@ -130,8 +130,17 @@ class WeiboVipPosterStoreImage(AbstractStoreImage):
         oss_url: Optional[str] = None
         save_mode = await oss_uploader.get_save_mode()
 
-        # Save to local
-        if save_mode in ("local", "both"):
+        need_local = save_mode in ("local", "both")
+        need_oss = save_mode in ("oss", "both")
+
+        if need_oss and not oss_uploader.is_configured():
+            utils.logger.warning(
+                "[WeiboVipPosterStoreImage] COS 未配置，自动回退到本地保存"
+            )
+            need_local = True
+            need_oss = False
+
+        if need_local:
             pathlib.Path(self.image_store_path).mkdir(parents=True, exist_ok=True)
             save_file_name = self.make_save_file_name(picid, extension_file_name)
             async with aiofiles.open(save_file_name, 'wb') as f:
@@ -139,8 +148,7 @@ class WeiboVipPosterStoreImage(AbstractStoreImage):
                 local_path = save_file_name
                 utils.logger.info(f"[WeiboVipPosterStoreImage.save_image] Saved VIP poster to local: {save_file_name}")
 
-        # Upload to OSS
-        if save_mode in ("oss", "both"):
+        if need_oss:
             filename = f"{picid}.{extension_file_name}"
             content_type = self._get_content_type(extension_file_name)
             oss_url = await oss_uploader.upload_bytes(pic_content, filename, content_type)

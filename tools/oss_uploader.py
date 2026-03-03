@@ -147,7 +147,7 @@ class COSUploader:
         await self._ensure_db_config()
 
         if not self.is_configured():
-            utils.logger.warning("[COSUploader] COS not configured, skipping upload")
+            utils.logger.debug("[COSUploader] COS 未配置，跳过上传（调用方应自行处理 fallback）")
             return None
 
         try:
@@ -192,7 +192,7 @@ class COSUploader:
         await self._ensure_db_config()
 
         if not self.is_configured():
-            utils.logger.warning("[COSUploader] COS not configured, skipping upload")
+            utils.logger.debug("[COSUploader] COS 未配置，跳过上传（调用方应自行处理 fallback）")
             return None
 
         if not os.path.exists(file_path):
