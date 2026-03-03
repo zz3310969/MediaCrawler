@@ -5,7 +5,7 @@
 import json
 import logging
 from typing import Optional, List, Dict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select, func, and_, delete as sa_delete, update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 def _timestamp_to_datetime(ts: int) -> Optional[datetime]:
     if not ts:
         return None
-    return datetime.utcfromtimestamp(ts)
+    return datetime.fromtimestamp(ts, tz=timezone.utc)
 
 
 def _datetime_to_timestamp(dt: Optional[datetime]) -> int:
@@ -63,7 +63,7 @@ def _db_task_to_schema(db_task: CrawlerTask) -> Task:
         idempotency_key=idempotency_key,
         cancel_requested=cancel_requested,
         error_message=db_task.error_message or None,
-        created_at=_timestamp_to_datetime(db_task.created_at) or datetime.utcnow(),
+        created_at=_timestamp_to_datetime(db_task.created_at) or datetime.now(timezone.utc),
         scheduled_at=_timestamp_to_datetime(db_task.scheduled_at),
         started_at=_timestamp_to_datetime(db_task.started_at),
         finished_at=_timestamp_to_datetime(db_task.finished_at),

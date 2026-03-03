@@ -3,7 +3,7 @@
 """
 from enum import Enum
 from typing import Optional, Dict, Any, List
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pydantic import BaseModel, Field
 import uuid
 
@@ -111,7 +111,7 @@ class Task(BaseModel):
     error_message: Optional[str] = None        # 错误信息
     
     # 时间
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     scheduled_at: Optional[datetime] = None
     started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
@@ -135,16 +135,16 @@ class TaskLease(BaseModel):
     lease_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     task_id: str
     worker_id: str
-    acquired_at: datetime = Field(default_factory=datetime.utcnow)
+    acquired_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     expires_at: datetime
     
     def is_expired(self) -> bool:
-        return datetime.utcnow() > self.expires_at
+        return datetime.now(timezone.utc) > self.expires_at
     
     @classmethod
     def create(cls, task_id: str, worker_id: str, lease_seconds: int = 300) -> "TaskLease":
         """创建租约"""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         return cls(
             task_id=task_id,
             worker_id=worker_id,
