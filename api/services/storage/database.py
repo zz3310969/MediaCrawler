@@ -179,9 +179,12 @@ class DatabaseTaskStorage(ITaskStorage):
                     existing.update(value)
                     db_task.progress = json.dumps(existing, ensure_ascii=False)
                 elif key == "result" and isinstance(value, dict):
-                    existing = json.loads(db_task.result) if db_task.result else {}
-                    existing.update(value)
-                    db_task.result = json.dumps(existing, ensure_ascii=False)
+                    if value:
+                        existing = json.loads(db_task.result) if db_task.result else {}
+                        existing.update(value)
+                        db_task.result = json.dumps(existing, ensure_ascii=False)
+                    else:
+                        db_task.result = "{}"
                 elif key == "metadata" and isinstance(value, dict):
                     existing = json.loads(db_task.task_metadata) if db_task.task_metadata else {}
                     existing.update(value)
@@ -206,7 +209,9 @@ class DatabaseTaskStorage(ITaskStorage):
                     elif isinstance(value, (int, float)):
                         db_task.last_heartbeat_at = int(value)
                 elif key in ("started_at", "finished_at", "scheduled_at"):
-                    if isinstance(value, datetime):
+                    if value is None:
+                        setattr(db_task, key, 0)
+                    elif isinstance(value, datetime):
                         setattr(db_task, key, int(value.timestamp()))
                     elif isinstance(value, (int, float)):
                         setattr(db_task, key, int(value))

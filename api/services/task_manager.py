@@ -311,54 +311,42 @@ class TaskManager:
 
     async def retry_task(self, session_id: str, task_id: str) -> Task:
         """
-        重试失败的任务
-        
-        - 创建一个新任务（保留原配置）
-        - 或者将死信任务重新入队
+        重跑任务（原地重试，不创建新任务）：
+        1. 重置 task 状态为 pending，清空旧结果
+        2. 尝试从死信队列恢复；若不在死信队列则直接重新入队
         """
         task = await self.get_task(session_id, task_id)
         
         if task.status not in (TaskStatus.FAILED, TaskStatus.CANCELLED, TaskStatus.COMPLETED):
-            raise TaskManagerError("Can only retry failed, cancelled or completed tasks")
+            raise TaskManagerError("Can only rerun failed, cancelled or completed tasks")
         
-        # 方案1：从死信队列恢复
-        if await self._queue.retry_dead_letter(task_id):
-            await self._storage.update(task_id, {
-                "status": TaskStatus.PENDING,
-                "retry_count": 0,
-                "cancel_requested": False,
-                "result": {}
-            })
-            
-            await self._event_bus.publish(TaskEvent(
-                event_type=EventType.TASK_RETRYING,
-                task_id=task_id,
-                session_id=session_id
-            ))
-            
-            logger.info(f"Task {task_id} retried from dead letter")
-            return await self._storage.get(task_id)
-        
-        # 方案2：创建新任务
-        new_task = Task(
-            session_id=session_id,
-            task_name=f"{task.task_name or 'Task'} (retry)",
-            config=task.config,
-            priority=task.priority
-        )
-        
-        await self._storage.create(new_task)
-        await self._queue.enqueue(new_task, new_task.priority)
-        
+        # 重置 storage 中的状态，清空旧结果
+        await self._storage.update(task_id, {
+            "status": TaskStatus.PENDING,
+            "retry_count": 0,
+            "cancel_requested": False,
+            "result": {},
+            "error_message": None,
+            "started_at": None,
+            "finished_at": None,
+        })
+
+        # 先尝试从死信队列恢复（失败重试场景）
+        recovered = await self._queue.retry_dead_letter(task_id)
+
+        if not recovered:
+            # 直接重新入队（completed / cancelled 场景，任务不在死信队列）
+            fresh_task = await self._storage.get(task_id)
+            await self._queue.enqueue(fresh_task, fresh_task.priority)
+
         await self._event_bus.publish(TaskEvent(
-            event_type=EventType.TASK_CREATED,
-            task_id=new_task.task_id,
-            session_id=session_id,
-            payload={"retry_of": task_id}
+            event_type=EventType.TASK_RETRYING,
+            task_id=task_id,
+            session_id=session_id
         ))
-        
-        logger.info(f"Created retry task {new_task.task_id} for {task_id}")
-        return new_task
+
+        logger.info(f"Task {task_id} requeued for rerun (recovered_from_dead_letter={recovered})")
+        return await self._storage.get(task_id)
     
     async def update_priority(
         self,

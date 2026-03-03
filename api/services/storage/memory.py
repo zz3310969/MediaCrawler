@@ -92,9 +92,12 @@ class MemoryTaskStorage(ITaskStorage):
                         for pk, pv in value.items():
                             setattr(task.progress, pk, pv)
                     elif key == "result" and isinstance(value, dict):
-                        # 合并 result 字段
-                        for rk, rv in value.items():
-                            setattr(task.result, rk, rv)
+                        if value:
+                            for rk, rv in value.items():
+                                setattr(task.result, rk, rv)
+                        else:
+                            from api.schemas.task import TaskResult
+                            task.result = TaskResult()
                     elif key == "metadata" and isinstance(value, dict):
                         # 合并 metadata 字段
                         for mk, mv in value.items():
