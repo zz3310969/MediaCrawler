@@ -206,8 +206,8 @@ sudo mysql_secure_installation
 # 创建数据库和用户
 sudo mysql -e "
 CREATE DATABASE media_crawler CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-CREATE USER 'mediacrawler'@'localhost' IDENTIFIED BY '你的密码';
-GRANT ALL PRIVILEGES ON media_crawler.* TO 'mediacrawler'@'localhost';
+CREATE USER 'mediacrawler'@'%' IDENTIFIED BY 'maxmaxmax';
+GRANT ALL PRIVILEGES ON media_crawler.* TO 'mediacrawler'@'%';
 FLUSH PRIVILEGES;
 "
 
@@ -216,7 +216,7 @@ export MYSQL_DB_HOST=localhost
 export MYSQL_DB_PORT=3306
 export MYSQL_DB_NAME=media_crawler
 export MYSQL_DB_USER=mediacrawler
-export MYSQL_DB_PWD='你的密码'
+export MYSQL_DB_PWD='maxmaxmax'
 
 # 初始化表结构
 cd /opt/mediacrawler
