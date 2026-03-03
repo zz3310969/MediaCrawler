@@ -73,6 +73,13 @@ export function useCreateTask() {
 }
 
 /**
+ * 启动任务
+ */
+export function useStartTask() {
+  return useMutation<Task, string>(tasksApi.start)
+}
+
+/**
  * 取消任务
  */
 export function useCancelTask() {

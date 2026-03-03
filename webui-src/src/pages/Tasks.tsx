@@ -5,7 +5,7 @@ import { PageHeader } from '../components/layout';
 import { Button } from '../components/common';
 import { TaskCard, TaskTabs } from '../components/tasks';
 import type { TaskStatus, Task } from '../types/task';
-import { useTasks, useCancelTask, useRetryTask, useDeleteTask } from '../hooks';
+import { useTasks, useStartTask, useCancelTask, useRetryTask, useDeleteTask } from '../hooks';
 
 export function Tasks() {
   const [activeTab, setActiveTab] = useState<TaskStatus | 'all'>('all');
@@ -18,6 +18,7 @@ export function Tasks() {
   });
 
   // 任务操作
+  const { mutate: startTask } = useStartTask();
   const { mutate: cancelTask } = useCancelTask();
   const { mutate: retryTask } = useRetryTask();
   const { mutate: deleteTask } = useDeleteTask();
@@ -37,6 +38,9 @@ export function Tasks() {
   const handleTaskAction = async (action: 'start' | 'pause' | 'restart' | 'delete', taskId: string) => {
     try {
       switch (action) {
+        case 'start':
+          await startTask(taskId);
+          break;
         case 'pause':
           await cancelTask(taskId);
           break;
@@ -46,15 +50,15 @@ export function Tasks() {
         case 'delete':
           if (window.confirm('确定要删除这个任务吗？')) {
             await deleteTask(taskId);
+          } else {
+            return;
           }
           break;
-        default:
-          console.log('Task action:', action, taskId);
       }
-      // 刷新任务列表
       refetch();
-    } catch (err) {
-      console.error('Task action failed:', err);
+    } catch (err: any) {
+      const message = err?.message || '操作失败';
+      alert(message);
     }
   };
 

@@ -108,6 +108,14 @@ export const tasksApi = {
   },
 
   /**
+   * 启动等待中的任务
+   */
+  async start(taskId: string): Promise<Task> {
+    const res = await client.post<Task>(`/api/tasks/${taskId}/start`);
+    return res.data;
+  },
+
+  /**
    * 取消任务
    */
   async cancel(taskId: string): Promise<{ message: string }> {

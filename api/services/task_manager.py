@@ -257,6 +257,26 @@ class TaskManager:
             logger.warning(f"Cannot cancel task {task_id} in status {task.status}")
             return False
     
+    async def start_task(self, session_id: str, task_id: str) -> Task:
+        """
+        手动启动等待中的任务（重新入队）
+        """
+        task = await self.get_task(session_id, task_id)
+
+        if task.status != TaskStatus.PENDING:
+            raise TaskManagerError("Only pending tasks can be started")
+
+        await self._queue.enqueue(task, task.priority)
+
+        await self._event_bus.publish(TaskEvent(
+            event_type=EventType.TASK_QUEUED,
+            task_id=task_id,
+            session_id=session_id
+        ))
+
+        logger.info(f"Task {task_id} manually started (re-enqueued)")
+        return await self._storage.get(task_id)
+
     async def retry_task(self, session_id: str, task_id: str) -> Task:
         """
         重试失败的任务
@@ -333,9 +353,11 @@ class TaskManager:
         """删除任务"""
         task = await self.get_task(session_id, task_id)
         
-        # 只能删除已完成的任务
-        if task.status in (TaskStatus.PENDING, TaskStatus.RUNNING):
-            raise TaskManagerError("Cannot delete pending or running tasks")
+        if task.status == TaskStatus.RUNNING:
+            raise TaskManagerError("无法删除运行中的任务，请先取消任务")
+        
+        if task.status == TaskStatus.PENDING:
+            await self._queue.remove(task_id)
         
         await self._storage.delete(task_id)
         logger.info(f"Task {task_id} deleted")

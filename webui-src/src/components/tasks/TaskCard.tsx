@@ -88,10 +88,10 @@ export function TaskCard({ task, onAction }: TaskCardProps) {
       <div className="flex items-center justify-between pt-3 border-t border-border">
         <span className="text-xs text-text-secondary">
           {task.finished_at
-            ? `完成于 ${formatRelativeTime(new Date(task.finished_at * 1000))}`
+            ? `完成于 ${formatRelativeTime(new Date(task.finished_at))}`
             : task.started_at
-            ? `开始于 ${formatRelativeTime(new Date(task.started_at * 1000))}`
-            : `创建于 ${formatRelativeTime(new Date(task.created_at * 1000))}`}
+            ? `开始于 ${formatRelativeTime(new Date(task.started_at))}`
+            : `创建于 ${formatRelativeTime(new Date(task.created_at))}`}
         </span>
         
         <div className="flex items-center gap-2">

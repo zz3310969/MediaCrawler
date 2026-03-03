@@ -47,6 +47,7 @@ export {
   useTaskStats as useTasksStats,
   useTaskLogs,
   useCreateTask,
+  useStartTask,
   useCancelTask,
   useRetryTask,
   useDeleteTask,

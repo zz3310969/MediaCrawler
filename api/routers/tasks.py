@@ -119,6 +119,24 @@ async def get_task_logs(
         raise HTTPException(status_code=403, detail="Permission denied")
 
 
+@router.post("/{task_id}/start", response_model=Task)
+async def start_task(
+    task_id: str,
+    session_id: str = Depends(require_session_id)
+):
+    """手动启动等待中的任务"""
+    task_manager = get_task_manager()
+    
+    try:
+        return await task_manager.start_task(session_id, task_id)
+    except TaskNotFoundError:
+        raise HTTPException(status_code=404, detail="Task not found")
+    except PermissionDeniedError:
+        raise HTTPException(status_code=403, detail="Permission denied")
+    except TaskManagerError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @router.post("/{task_id}/cancel")
 async def cancel_task(
     task_id: str,
