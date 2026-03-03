@@ -295,10 +295,19 @@ class TaskExecutor:
             
             await self._queue.ack(lease.lease_id)
             
+            # 从最新进度中读取实际爬取数量
+            latest_task = await self._storage.get(task.task_id)
+            items_crawled = 0
+            if latest_task and latest_task.progress:
+                items_crawled = latest_task.progress.items_crawled or 0
+            
             await self._storage.update(task.task_id, {
                 "status": TaskStatus.COMPLETED,
                 "finished_at": datetime.utcnow(),
-                "result": {"success": True}
+                "result": {
+                    "success": True,
+                    "statistics": {"items_crawled": items_crawled}
+                }
             })
             
             await self._event_bus.publish(TaskEvent(

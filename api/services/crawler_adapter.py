@@ -444,6 +444,18 @@ asyncio.run(run())
         
         if return_code == 0:
             await self.ctx.info("爬虫任务执行完成")
+            
+            # 兜底：日志未匹配到进度时，从输出文件统计数量
+            if items_crawled == 0:
+                items_crawled = self._count_output_files()
+            
+            if items_crawled > 0:
+                await self.ctx.update_progress(
+                    current=items_crawled,
+                    total=max(items_crawled, self.task.config.max_notes),
+                    items_crawled=items_crawled
+                )
+            
             return {
                 "success": True,
                 "items_crawled": items_crawled,
@@ -478,7 +490,6 @@ asyncio.run(run())
     
     def _extract_progress(self, line: str) -> Optional[Dict[str, int]]:
         """从日志行提取进度信息"""
-        # 尝试匹配常见的进度模式
         import re
         
         # 模式1: "Crawled item X/Y" 或 "已爬取 X/Y"
@@ -496,8 +507,89 @@ asyncio.run(run())
         if match:
             return {"items": int(match.group(1))}
         
+        # 模式4: 微博 "total items: X"（Finished processing VIP creator xxx, total items: 100）
+        match = re.search(r"total items:\s*(\d+)", line, re.IGNORECASE)
+        if match:
+            return {"items": int(match.group(1))}
+        
+        # 模式5: 微博 "Total VIP content count: X"
+        match = re.search(r"Total VIP content count:\s*(\d+)", line, re.IGNORECASE)
+        if match:
+            return {"items": int(match.group(1))}
+        
+        # 模式6: 微博滚动进度 "collected X/Y items" 或 "collected X/? items"
+        match = re.search(r"collected\s+(\d+)/(\d+)\s+items", line, re.IGNORECASE)
+        if match:
+            return {"items": int(match.group(1)), "total": int(match.group(2))}
+        
+        # 模式7: 通用 "total: X" 或 "total_count: X"
+        match = re.search(r"\btotal(?:_count)?\s*[:=]\s*(\d+)", line, re.IGNORECASE)
+        if match:
+            return {"items": int(match.group(1))}
+        
         return None
     
+    def _count_output_files(self) -> int:
+        """
+        兜底方案：统计本次任务输出的数据文件数量
+        当日志中无法匹配到进度时使用
+        """
+        platform = self.task.config.platform
+        crawler_type = self.task.config.crawler_type
+        
+        # 各平台输出目录映射
+        platform_dirs = {
+            "wb": "weibo",
+            "xhs": "xhs",
+            "dy": "douyin",
+            "ks": "kuaishou",
+            "bili": "bilibili",
+            "tieba": "tieba",
+            "zhihu": "zhihu",
+        }
+        platform_name = platform_dirs.get(platform, platform)
+        
+        try:
+            # vip 类型：统计 vip_contents 目录下的文件
+            if "vip" in crawler_type:
+                vip_dir = PROJECT_ROOT / "data" / platform_name / "vip_contents"
+                if vip_dir.exists():
+                    # 统计 JSON/CSV 文件中的记录数
+                    return self._count_records_in_dir(vip_dir)
+            
+            # creator 类型：统计 creator_content 目录
+            if "creator" in crawler_type:
+                creator_dir = PROJECT_ROOT / "data" / platform_name / "creator_content"
+                if creator_dir.exists():
+                    return self._count_records_in_dir(creator_dir)
+            
+            # search 类型：统计 contents 目录
+            data_dir = PROJECT_ROOT / "data" / platform_name
+            if data_dir.exists():
+                return self._count_records_in_dir(data_dir)
+        except Exception as e:
+            logger.debug(f"统计输出文件失败: {e}")
+        
+        return 0
+
+    def _count_records_in_dir(self, directory: Path) -> int:
+        """统计目录下 JSON 文件中的记录总数"""
+        total = 0
+        try:
+            for json_file in directory.glob("*.json"):
+                try:
+                    content = json_file.read_text(encoding="utf-8")
+                    data = json.loads(content)
+                    if isinstance(data, list):
+                        total += len(data)
+                    elif isinstance(data, dict):
+                        total += 1
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        return total
+
     async def _terminate_process(self):
         """终止子进程"""
         if self.process and self.process.returncode is None:
