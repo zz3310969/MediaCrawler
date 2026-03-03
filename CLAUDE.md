@@ -217,3 +217,10 @@ The WebUI uses an event-driven task system:
 - Config files: `{platform}_config.py`
 - Store implementations: `store/{platform}/`
 - Models: `{platform}_store_impl.py` for platform-specific storage
+
+## Documentation
+
+All developer documentation lives in `docs/`:
+- `docs/architecture.md` - System architecture, module design, directory structure
+- `docs/development.md` - Environment setup, WebUI development, debugging
+- `docs/README.md` - Documentation index with full navigation

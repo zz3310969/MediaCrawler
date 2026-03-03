@@ -24,20 +24,7 @@
 
 ## 🚀 快速开始
 
-### 1. 数据库迁移
-
-首次使用需要执行数据库迁移，添加增量元数据表：
-
-```bash
-# 方法1: 使用Python脚本（推荐）
-python database/migrations/migrate_incremental.py
-
-# 方法2: 手动执行SQL
-# 如果使用SQLite，执行：
-sqlite3 your_database.db < database/migrations/add_incremental_metadata.sql
-```
-
-### 2. 配置启用
+### 1. 配置启用
 
 编辑 `config/base_config.py`：
 
@@ -49,13 +36,15 @@ ENABLE_INCREMENTAL_CRAWL = True
 CREATOR_EARLY_STOP_THRESHOLD = 3  # 推荐 3-5
 ```
 
-### 3. 开始使用
+### 2. 开始使用
 
 正常运行爬虫即可，系统会自动使用增量爬取：
 
 ```bash
-python main.py
+uv run main.py
 ```
+
+> V2 版本无需执行数据库迁移，支持 DB、JSON、CSV 等所有存储模式开箱即用。
 
 ---
 
@@ -265,9 +254,8 @@ INCREMENTAL_METADATA_STORE = "db"
 
 如果遇到问题，请检查：
 
-1. ✅ 数据库迁移是否成功执行
-2. ✅ 配置项是否正确设置
-3. ✅ 日志中是否有增量相关信息
+1. ✅ 配置项是否正确设置
+2. ✅ 日志中是否有增量相关信息
 
 查看日志中的增量标识：
 ```
@@ -278,19 +266,13 @@ INCREMENTAL_METADATA_STORE = "db"
 
 ---
 
-## 📘 微博VIP专属指南
+## 📘 微博 VIP 模式
 
-微博VIP模式（creator_vip）已支持增量爬取！
-
-详细使用指南请查看: [微博VIP增量爬取功能指南](./weibo_vip_incremental_guide.md)
-
-**特点**:
-- ✅ 支持早停策略
-- ✅ 效率提升 10-500倍
-- ✅ 自动查询历史数据
-- ✅ 智能跳过已存在内容
+微博 VIP 模式（`creator_vip`）也支持增量爬取，配置方式与其他平台一致。
 
 ---
 
-**享受高效爬取！** 🚀
+### 支持的平台
+
+增量爬取支持所有平台（小红书、抖音、B站、微博、快手、贴吧、知乎、微信），所有存储方式（DB、JSON、CSV、Excel）。
 

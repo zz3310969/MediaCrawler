@@ -328,8 +328,19 @@ Thordata：可靠且经济高效的代理服务提供商。为企业和开发者
 - 邮箱：`relakkes@gmail.com`
 ---
 
+### 📚 开发文档
+
+项目完整技术文档在 [`docs/`](docs/README.md) 目录下，包括：
+
+- **[项目架构](docs/architecture.md)** - 系统架构、模块设计、目录结构、扩展开发
+- **[开发指南](docs/development.md)** - 环境搭建、WebUI 开发、调试技巧
+- **[数据存储](docs/data_storage_guide.md)** - 各存储方式的配置与使用
+- **[增量爬取](docs/incremental_crawl_guide.md)** - 增量爬取原理与配置
+- **[代理系统](docs/proxy_enhancement_guide.md)** - 代理池、质量评估、故障转移
+- **[反爬增强](docs/ANTI_DETECT_GUIDE.md)** - 指纹管理、行为模拟
+
 ### 📚 其他
-- **常见问题**：[MediaCrawler 完整文档](https://nanmicoder.github.io/MediaCrawler/)
+- **在线文档**：[MediaCrawler 文档站](https://nanmicoder.github.io/MediaCrawler/)
 - **爬虫入门教程**：[CrawlerTutorial 免费教程](https://github.com/NanmiCoder/CrawlerTutorial)
 - **新闻爬虫开源项目**：[NewsCrawlerCollection](https://github.com/NanmiCoder/NewsCrawlerCollection)
 
