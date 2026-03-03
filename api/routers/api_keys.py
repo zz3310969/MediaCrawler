@@ -4,7 +4,7 @@ API Key 管理路由
 import json
 import logging
 from typing import List
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException, Depends
 
@@ -32,7 +32,7 @@ async def create_api_key(
     expires_at = 0
     expires_dt = None
     if request.expire_days:
-        expires_dt = datetime.utcnow() + timedelta(days=request.expire_days)
+        expires_dt = datetime.now(timezone.utc) + timedelta(days=request.expire_days)
         expires_at = int(expires_dt.timestamp())
 
     async with get_db_session() as db_session:

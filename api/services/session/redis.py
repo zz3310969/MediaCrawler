@@ -3,7 +3,7 @@ Redis 版 Session 存储实现
 """
 import logging
 from typing import Optional, List
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import redis.asyncio as redis
 
@@ -89,7 +89,7 @@ class RedisSessionStore(ISessionStore):
             if hasattr(session, key):
                 setattr(session, key, value)
         
-        session.last_active = datetime.utcnow()
+        session.last_active = datetime.now(timezone.utc)
         
         # 获取剩余 TTL
         ttl = await r.ttl(self._key(session_id))
@@ -162,7 +162,7 @@ class RedisSessionStore(ISessionStore):
             return False
         
         # 检查是否需要重置每日配额
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         if now.date() > session.quota.quota_reset_at.date():
             session.reset_daily_quota()
         

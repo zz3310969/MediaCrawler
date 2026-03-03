@@ -3,7 +3,7 @@
 """
 import logging
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, timezone
 
 from api.interfaces.queue import ITaskQueue
 from api.interfaces.storage import ITaskStorage
@@ -158,8 +158,8 @@ class TaskManager:
             raise DuplicateTaskError(str(e))
         
         # 8. 入队
-        if request.scheduled_at and request.scheduled_at > datetime.utcnow():
-            delay = (request.scheduled_at - datetime.utcnow()).total_seconds()
+        if request.scheduled_at and request.scheduled_at > datetime.now(timezone.utc):
+            delay = (request.scheduled_at - datetime.now(timezone.utc)).total_seconds()
             await self._queue.enqueue_delayed(task, int(delay))
         else:
             await self._queue.enqueue(task, task.priority)
@@ -262,7 +262,7 @@ class TaskManager:
             # 更新状态
             await self._storage.update(task_id, {
                 "status": TaskStatus.CANCELLED,
-                "finished_at": datetime.utcnow()
+                "finished_at": datetime.now(timezone.utc)
             })
             
             # 发布事件
@@ -429,9 +429,9 @@ class TaskManager:
         data = {"status": status, **kwargs}
         
         if status == TaskStatus.RUNNING:
-            data["started_at"] = datetime.utcnow()
+            data["started_at"] = datetime.now(timezone.utc)
         elif status in (TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED):
-            data["finished_at"] = datetime.utcnow()
+            data["finished_at"] = datetime.now(timezone.utc)
         
         result = await self._storage.update(task_id, data)
         
@@ -473,7 +473,7 @@ class TaskManager:
                 "percentage": percentage,
                 **extra
             },
-            "last_heartbeat_at": datetime.utcnow()
+            "last_heartbeat_at": datetime.now(timezone.utc)
         })
         
         if result:

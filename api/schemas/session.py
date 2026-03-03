@@ -2,7 +2,7 @@
 会话相关数据模型
 """
 from typing import Optional, Dict, List
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pydantic import BaseModel, Field
 import secrets
 
@@ -17,7 +17,7 @@ class SessionQuota(BaseModel):
     def can_create_task(self) -> bool:
         """检查是否可以创建新任务"""
         # 检查是否需要重置每日配额
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         if now.date() > self.quota_reset_at.date():
             return True  # 新的一天，配额会被重置
         return self.used_daily_tasks < self.max_daily_tasks
@@ -48,7 +48,7 @@ class Session(BaseModel):
     ip_prefix: Optional[str] = None            # 绑定 IP 段（可选）
     
     def is_expired(self) -> bool:
-        return datetime.utcnow() > self.expires_at
+        return datetime.now(timezone.utc) > self.expires_at
     
     def is_valid(self) -> bool:
         """检查会话是否有效"""
@@ -56,13 +56,13 @@ class Session(BaseModel):
     
     def refresh(self, extend_hours: int = 24) -> None:
         """刷新会话过期时间"""
-        self.expires_at = datetime.utcnow() + timedelta(hours=extend_hours)
-        self.last_active = datetime.utcnow()
+        self.expires_at = datetime.now(timezone.utc) + timedelta(hours=extend_hours)
+        self.last_active = datetime.now(timezone.utc)
     
     def reset_daily_quota(self) -> None:
         """重置每日配额"""
         self.quota.used_daily_tasks = 0
-        self.quota.quota_reset_at = datetime.utcnow()
+        self.quota.quota_reset_at = datetime.now(timezone.utc)
     
     @classmethod
     def create(
@@ -72,7 +72,7 @@ class Session(BaseModel):
         **kwargs
     ) -> "Session":
         """创建新会话"""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         return cls(
             user_id=user_id,
             created_at=now,

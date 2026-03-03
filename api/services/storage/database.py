@@ -78,7 +78,7 @@ def _db_task_to_schema(db_task: CrawlerTask) -> Task:
 
 def _schema_to_db_dict(task: Task) -> dict:
     """Task pydantic schema -> dict for CrawlerTask insert/update"""
-    now_ts = int(datetime.utcnow().timestamp())
+    now_ts = int(datetime.now(timezone.utc).timestamp())
     
     # 将 idempotency_key 和 cancel_requested 存入 task_metadata
     metadata_dict = task.metadata.model_dump()
@@ -168,10 +168,10 @@ class DatabaseTaskStorage(ITaskStorage):
                 if key == "status":
                     db_task.status = value if isinstance(value, str) else value.value
                     if value in (TaskStatus.RUNNING, "running") and not db_task.started_at:
-                        db_task.started_at = int(datetime.utcnow().timestamp())
+                        db_task.started_at = int(datetime.now(timezone.utc).timestamp())
                     elif value in (TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED,
                                    "completed", "failed", "cancelled"):
-                        db_task.finished_at = int(datetime.utcnow().timestamp())
+                        db_task.finished_at = int(datetime.now(timezone.utc).timestamp())
                 elif key == "progress" and isinstance(value, dict):
                     existing = json.loads(db_task.progress) if db_task.progress else {}
                     existing.update(value)
@@ -209,7 +209,7 @@ class DatabaseTaskStorage(ITaskStorage):
                     elif isinstance(value, (int, float)):
                         setattr(db_task, key, int(value))
 
-            db_task.last_heartbeat_at = int(datetime.utcnow().timestamp())
+            db_task.last_heartbeat_at = int(datetime.now(timezone.utc).timestamp())
             session.add(db_task)
             await session.commit()
             return True
@@ -298,7 +298,7 @@ class DatabaseTaskStorage(ITaskStorage):
             return 0
         async with self._get_session() as session:
             s = status if isinstance(status, str) else status.value
-            now_ts = int(datetime.utcnow().timestamp())
+            now_ts = int(datetime.now(timezone.utc).timestamp())
             update_vals = {"status": s, "last_heartbeat_at": now_ts}
             if s in ("completed", "failed", "cancelled"):
                 update_vals["finished_at"] = now_ts
@@ -341,7 +341,7 @@ class DatabaseTaskStorage(ITaskStorage):
                 level=log_entry.level if isinstance(log_entry.level, str) else log_entry.level.value,
                 message=log_entry.message,
                 extra=json.dumps(log_entry.extra, ensure_ascii=False, default=str) if log_entry.extra else "{}",
-                created_at=int(log_entry.timestamp.timestamp()) if log_entry.timestamp else int(datetime.utcnow().timestamp()),
+                created_at=int(log_entry.timestamp.timestamp()) if log_entry.timestamp else int(datetime.now(timezone.utc).timestamp()),
             )
             session.add(db_log)
             await session.commit()
@@ -367,7 +367,7 @@ class DatabaseTaskStorage(ITaskStorage):
                 entries.append(LogEntry(
                     log_id=db_log.log_id,
                     task_id=db_log.task_id,
-                    timestamp=_timestamp_to_datetime(db_log.created_at) or datetime.utcnow(),
+                    timestamp=_timestamp_to_datetime(db_log.created_at) or datetime.now(timezone.utc),
                     level=db_log.level,
                     message=db_log.message or "",
                     extra=extra,
@@ -460,7 +460,7 @@ class DatabaseTaskStorage(ITaskStorage):
 
     async def cleanup_old_tasks(self, days: int) -> int:
         async with self._get_session() as session:
-            cutoff_ts = int((datetime.utcnow() - timedelta(days=days)).timestamp())
+            cutoff_ts = int((datetime.now(timezone.utc) - timedelta(days=days)).timestamp())
             terminal_statuses = [
                 TaskStatus.COMPLETED.value,
                 TaskStatus.FAILED.value,

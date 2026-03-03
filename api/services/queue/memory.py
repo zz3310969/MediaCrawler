@@ -5,7 +5,7 @@ import asyncio
 import logging
 import heapq
 from typing import Optional, List, Dict, Tuple
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass, field
 
 from api.interfaces.queue import ITaskQueue, QueueStats
@@ -80,7 +80,7 @@ class MemoryTaskQueue(ITaskQueue):
             # 添加到队列（优先级取负，因为 heapq 是最小堆）
             item = PriorityItem(
                 priority=-prio,
-                timestamp=datetime.utcnow().timestamp(),
+                timestamp=datetime.now(timezone.utc).timestamp(),
                 task=task
             )
             heapq.heappush(self._ready_queue, item)
@@ -99,9 +99,9 @@ class MemoryTaskQueue(ITaskQueue):
         lease_seconds: int = 300
     ) -> Optional[TaskLease]:
         """预留/取出任务（阻塞）"""
-        deadline = datetime.utcnow() + timedelta(seconds=timeout)
+        deadline = datetime.now(timezone.utc) + timedelta(seconds=timeout)
         
-        while datetime.utcnow() < deadline:
+        while datetime.now(timezone.utc) < deadline:
             async with self._lock:
                 # 先提升延迟任务
                 await self._promote_delayed_internal()
@@ -130,7 +130,7 @@ class MemoryTaskQueue(ITaskQueue):
                 self._wait_event.clear()
             
             # 等待新任务或超时
-            remaining = (deadline - datetime.utcnow()).total_seconds()
+            remaining = (deadline - datetime.now(timezone.utc)).total_seconds()
             if remaining <= 0:
                 break
             
@@ -209,7 +209,7 @@ class MemoryTaskQueue(ITaskQueue):
                 # 重新入队
                 item = PriorityItem(
                     priority=-task.priority,
-                    timestamp=datetime.utcnow().timestamp(),
+                    timestamp=datetime.now(timezone.utc).timestamp(),
                     task=task
                 )
                 heapq.heappush(self._ready_queue, item)
@@ -229,14 +229,14 @@ class MemoryTaskQueue(ITaskQueue):
             if not info:
                 return False
             
-            info.lease.expires_at = datetime.utcnow() + timedelta(seconds=extend_seconds)
+            info.lease.expires_at = datetime.now(timezone.utc) + timedelta(seconds=extend_seconds)
             logger.debug(f"Lease {lease_id[:8]} extended by {extend_seconds}s")
             return True
     
     async def reclaim_expired_leases(self) -> int:
         """回收过期租约，返回回收数量"""
         async with self._lock:
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
             expired = []
             
             for lease_id, info in list(self._processing.items()):
@@ -300,7 +300,7 @@ class MemoryTaskQueue(ITaskQueue):
             if task.task_id in self._task_index or task.task_id in self._delayed_tasks:
                 return False
             
-            ready_time = datetime.utcnow() + timedelta(seconds=delay_seconds)
+            ready_time = datetime.now(timezone.utc) + timedelta(seconds=delay_seconds)
             self._delayed_tasks[task.task_id] = (ready_time, task)
             
             logger.debug(f"Task {task.task_id[:8]} delayed for {delay_seconds}s")
@@ -318,7 +318,7 @@ class MemoryTaskQueue(ITaskQueue):
     
     async def _promote_delayed_internal(self) -> int:
         """内部方法：提升延迟任务（不加锁）"""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         promoted = []
         
         for task_id, (ready_time, task) in list(self._delayed_tasks.items()):
@@ -409,7 +409,7 @@ class MemoryTaskQueue(ITaskQueue):
                     
                     item = PriorityItem(
                         priority=-task.priority,
-                        timestamp=datetime.utcnow().timestamp(),
+                        timestamp=datetime.now(timezone.utc).timestamp(),
                         task=task
                     )
                     heapq.heappush(self._ready_queue, item)

@@ -4,7 +4,7 @@
 import asyncio
 import logging
 from typing import Optional, List, Dict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from collections import deque
 
 from api.interfaces.storage import ITaskStorage
@@ -318,7 +318,7 @@ class MemoryTaskStorage(ITaskStorage):
     async def cleanup_old_tasks(self, days: int) -> int:
         """清理旧任务，返回清理数量"""
         async with self._lock:
-            cutoff = datetime.utcnow() - timedelta(days=days)
+            cutoff = datetime.now(timezone.utc) - timedelta(days=days)
             to_delete = []
             
             for task_id, task in self._tasks.items():

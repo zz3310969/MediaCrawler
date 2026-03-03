@@ -4,7 +4,7 @@
 import asyncio
 import logging
 from typing import Optional, List, Dict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from api.interfaces.session import ISessionStore
 from api.schemas.session import Session
@@ -66,7 +66,7 @@ class MemorySessionStore(ISessionStore):
                 if hasattr(session, key):
                     setattr(session, key, value)
             
-            session.last_active = datetime.utcnow()
+            session.last_active = datetime.now(timezone.utc)
             return True
     
     async def delete(self, session_id: str) -> bool:
@@ -107,7 +107,7 @@ class MemorySessionStore(ISessionStore):
     async def cleanup_expired(self) -> int:
         """清理过期会话，返回清理数量"""
         async with self._lock:
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
             expired_ids = [
                 sid for sid, session in self._sessions.items()
                 if session.is_expired()
@@ -144,7 +144,7 @@ class MemorySessionStore(ISessionStore):
                 return False
             
             # 检查是否需要重置每日配额
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
             if now.date() > session.quota.quota_reset_at.date():
                 session.reset_daily_quota()
             

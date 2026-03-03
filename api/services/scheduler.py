@@ -292,7 +292,7 @@ class SchedulerService:
 
                 task_config_dict = json.loads(model.task_config) if isinstance(model.task_config, str) else model.task_config
 
-                next_run_ts = int(datetime.utcnow().timestamp()) + (model.interval_seconds or 86400)
+                next_run_ts = int(datetime.now(timezone.utc).timestamp()) + (model.interval_seconds or 86400)
                 await schedule_crud.record_run(db, schedule_id, next_run_at=next_run_ts)
 
             task_config = TaskConfig(**task_config_dict)

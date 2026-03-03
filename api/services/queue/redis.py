@@ -5,7 +5,7 @@ import asyncio
 import json
 import logging
 from typing import Optional, List
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import uuid
 
 import redis.asyncio as redis
@@ -49,7 +49,7 @@ class RedisTaskQueue(ITaskQueue):
         prio = priority if priority is not None else task.priority
         
         # 分数 = 优先级 * -1 + 时间戳小数部分（确保同优先级 FIFO）
-        score = -prio + (datetime.utcnow().timestamp() / 1e10)
+        score = -prio + (datetime.now(timezone.utc).timestamp() / 1e10)
         
         # 存储任务数据
         task_key = self._key(f"task:{task.task_id}")
@@ -69,9 +69,9 @@ class RedisTaskQueue(ITaskQueue):
     ) -> Optional[TaskLease]:
         """预留任务"""
         r = await self._get_redis()
-        deadline = datetime.utcnow() + timedelta(seconds=timeout)
+        deadline = datetime.now(timezone.utc) + timedelta(seconds=timeout)
         
-        while datetime.utcnow() < deadline:
+        while datetime.now(timezone.utc) < deadline:
             # 使用 Lua 脚本原子性地移动任务
             script = """
             local task_id = redis.call('ZPOPMIN', KEYS[1])
@@ -113,7 +113,7 @@ class RedisTaskQueue(ITaskQueue):
                 return lease
             
             # 等待
-            await asyncio.sleep(min(1.0, (deadline - datetime.utcnow()).total_seconds()))
+            await asyncio.sleep(min(1.0, (deadline - datetime.now(timezone.utc)).total_seconds()))
         
         return None
     
@@ -218,7 +218,7 @@ class RedisTaskQueue(ITaskQueue):
         
         if lease_data:
             lease = TaskLease.model_validate_json(lease_data)
-            lease.expires_at = datetime.utcnow() + timedelta(seconds=extend_seconds)
+            lease.expires_at = datetime.now(timezone.utc) + timedelta(seconds=extend_seconds)
             
             await r.setex(lease_key, extend_seconds, lease.model_dump_json())
             
@@ -240,7 +240,7 @@ class RedisTaskQueue(ITaskQueue):
     async def reclaim_expired_leases(self) -> int:
         """回收过期租约"""
         r = await self._get_redis()
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         count = 0
         
         # 获取所有处理中的任务
@@ -282,7 +282,7 @@ class RedisTaskQueue(ITaskQueue):
             return False
         
         # 计算新分数
-        new_score = -new_priority + (datetime.utcnow().timestamp() / 1e10)
+        new_score = -new_priority + (datetime.now(timezone.utc).timestamp() / 1e10)
         await r.zadd(self._key("ready"), {task_id: new_score})
         
         # 更新任务数据
@@ -300,7 +300,7 @@ class RedisTaskQueue(ITaskQueue):
         """延迟入队"""
         r = await self._get_redis()
         
-        ready_time = datetime.utcnow() + timedelta(seconds=delay_seconds)
+        ready_time = datetime.now(timezone.utc) + timedelta(seconds=delay_seconds)
         score = ready_time.timestamp()
         
         # 存储任务数据
@@ -318,7 +318,7 @@ class RedisTaskQueue(ITaskQueue):
     async def promote_delayed(self) -> int:
         """提升延迟任务"""
         r = await self._get_redis()
-        now = datetime.utcnow().timestamp()
+        now = datetime.now(timezone.utc).timestamp()
         
         # 获取到期的延迟任务
         task_ids = await r.zrangebyscore(self._key("delayed"), 0, now)

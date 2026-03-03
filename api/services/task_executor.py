@@ -4,7 +4,7 @@
 import asyncio
 import logging
 from typing import Optional, Dict, Callable, Awaitable
-from datetime import datetime
+from datetime import datetime, timezone
 
 from api.interfaces.queue import ITaskQueue
 from api.interfaces.storage import ITaskStorage
@@ -246,7 +246,7 @@ class TaskExecutor:
         try:
             await self._storage.update(task.task_id, {
                 "status": TaskStatus.RUNNING,
-                "started_at": datetime.utcnow(),
+                "started_at": datetime.now(timezone.utc),
                 "metadata": {"execution_node": self._worker_id}
             })
             
@@ -303,7 +303,7 @@ class TaskExecutor:
             
             await self._storage.update(task.task_id, {
                 "status": TaskStatus.COMPLETED,
-                "finished_at": datetime.utcnow(),
+                "finished_at": datetime.now(timezone.utc),
                 "result": {
                     "success": True,
                     "statistics": {"items_crawled": items_crawled}
@@ -324,7 +324,7 @@ class TaskExecutor:
             
             await self._storage.update(task.task_id, {
                 "status": TaskStatus.CANCELLED,
-                "finished_at": datetime.utcnow()
+                "finished_at": datetime.now(timezone.utc)
             })
             
             await self._event_bus.publish(TaskEvent(
@@ -344,7 +344,7 @@ class TaskExecutor:
             
             await self._storage.update(task.task_id, {
                 "status": TaskStatus.FAILED,
-                "finished_at": datetime.utcnow(),
+                "finished_at": datetime.now(timezone.utc),
                 "result": {"success": False, "error_message": error_msg}
             })
             
@@ -409,7 +409,7 @@ class TaskExecutor:
                     elapsed_since_heartbeat = 0
                     await self._queue.heartbeat(lease.lease_id, self._lease_extend)
                     await self._storage.update(task.task_id, {
-                        "last_heartbeat_at": datetime.utcnow()
+                        "last_heartbeat_at": datetime.now(timezone.utc)
                     })
             except Exception as e:
                 logger.error(f"Heartbeat error: {e}")

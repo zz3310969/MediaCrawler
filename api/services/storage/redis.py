@@ -3,7 +3,7 @@ Redis 版任务存储实现
 """
 import logging
 from typing import Optional, List, Dict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from collections import deque
 
 import redis.asyncio as redis
@@ -339,7 +339,7 @@ class RedisTaskStorage(ITaskStorage):
     async def cleanup_old_tasks(self, days: int) -> int:
         """清理旧任务"""
         r = await self._get_redis()
-        cutoff = datetime.utcnow() - timedelta(days=days)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
         count = 0
         
         for status in [TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED]:

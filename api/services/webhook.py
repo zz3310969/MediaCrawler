@@ -7,7 +7,7 @@ import json
 import hashlib
 import logging
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 
 import httpx
@@ -44,7 +44,7 @@ async def send_webhook(
 
     body = {
         "event": event,
-        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
         "data": payload,
     }
     body_bytes = json.dumps(body, ensure_ascii=False, default=str).encode("utf-8")
