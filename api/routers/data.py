@@ -20,9 +20,9 @@ import os
 import json
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 
 # Add project root to sys.path
@@ -31,6 +31,49 @@ if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
 router = APIRouter(prefix="/data", tags=["data"])
+
+PLATFORM_TABLES = {
+    "xhs": [
+        {"table": "xhs_note", "model": "XhsNote", "label": "小红书笔记"},
+        {"table": "xhs_note_comment", "model": "XhsNoteComment", "label": "小红书评论"},
+        {"table": "xhs_creator", "model": "XhsCreator", "label": "小红书创作者"},
+    ],
+    "dy": [
+        {"table": "douyin_aweme", "model": "DouyinAweme", "label": "抖音视频"},
+        {"table": "douyin_aweme_comment", "model": "DouyinAwemeComment", "label": "抖音评论"},
+        {"table": "dy_creator", "model": "DyCreator", "label": "抖音创作者"},
+    ],
+    "bili": [
+        {"table": "bilibili_video", "model": "BilibiliVideo", "label": "B站视频"},
+        {"table": "bilibili_video_comment", "model": "BilibiliVideoComment", "label": "B站评论"},
+        {"table": "bilibili_up_info", "model": "BilibiliUpInfo", "label": "B站UP主"},
+    ],
+    "wb": [
+        {"table": "weibo_note", "model": "WeiboNote", "label": "微博笔记"},
+        {"table": "weibo_note_comment", "model": "WeiboNoteComment", "label": "微博评论"},
+        {"table": "weibo_vip_note", "model": "WeiboVipNote", "label": "微博VIP内容"},
+        {"table": "weibo_creator", "model": "WeiboCreator", "label": "微博创作者"},
+    ],
+    "tieba": [
+        {"table": "tieba_note", "model": "TiebaNote", "label": "贴吧帖子"},
+        {"table": "tieba_comment", "model": "TiebaComment", "label": "贴吧评论"},
+        {"table": "tieba_creator", "model": "TiebaCreator", "label": "贴吧用户"},
+    ],
+    "zhihu": [
+        {"table": "zhihu_content", "model": "ZhihuContent", "label": "知乎内容"},
+        {"table": "zhihu_comment", "model": "ZhihuComment", "label": "知乎评论"},
+        {"table": "zhihu_creator", "model": "ZhihuCreator", "label": "知乎用户"},
+    ],
+    "ks": [
+        {"table": "kuaishou_video", "model": "KuaishouVideo", "label": "快手视频"},
+        {"table": "kuaishou_video_comment", "model": "KuaishouVideoComment", "label": "快手评论"},
+    ],
+    "wechat": [
+        {"table": "wechat_article", "model": "WechatArticle", "label": "微信文章"},
+        {"table": "wechat_comment", "model": "WechatComment", "label": "微信评论"},
+        {"table": "wechat_account", "model": "WechatAccount", "label": "微信公众号"},
+    ],
+}
 
 # Data directory
 DATA_DIR = Path(__file__).parent.parent.parent / "data"
@@ -330,6 +373,190 @@ async def export_task_data(
         "task_id": task_id,
         "platform": platform,
     }
+
+
+def _get_model_class(model_name: str):
+    """Get SQLAlchemy model class by name"""
+    import database.models as models
+    model_cls = getattr(models, model_name, None)
+    if model_cls is None:
+        raise HTTPException(status_code=400, detail=f"Unknown model: {model_name}")
+    return model_cls
+
+
+@router.get("/db/tables")
+async def list_db_tables(platform: Optional[str] = None):
+    """List database tables with record counts"""
+    import config
+    save_option = getattr(config, "SAVE_DATA_OPTION", "json")
+    if save_option in ("json", "csv", "excel"):
+        return {"tables": [], "db_type": save_option, "available": False}
+
+    try:
+        from database.db_session import get_session
+        from sqlalchemy import func, select
+
+        tables_to_query = []
+        if platform:
+            tables_to_query = PLATFORM_TABLES.get(platform, [])
+        else:
+            for p_tables in PLATFORM_TABLES.values():
+                tables_to_query.extend(p_tables)
+
+        results = []
+        async with get_session() as session:
+            if session is None:
+                return {"tables": [], "db_type": save_option, "available": False}
+            for table_info in tables_to_query:
+                try:
+                    model_cls = _get_model_class(table_info["model"])
+                    stmt = select(func.count()).select_from(model_cls)
+                    res = await session.execute(stmt)
+                    count = res.scalar() or 0
+                    if count > 0:
+                        results.append({
+                            "table": table_info["table"],
+                            "label": table_info["label"],
+                            "model": table_info["model"],
+                            "platform": next(
+                                (p for p, ts in PLATFORM_TABLES.items() if table_info in ts), ""
+                            ),
+                            "record_count": count,
+                        })
+                except Exception:
+                    continue
+
+        results.sort(key=lambda x: x["record_count"], reverse=True)
+        return {"tables": results, "db_type": save_option, "available": True}
+
+    except Exception as e:
+        return {"tables": [], "db_type": save_option, "available": False, "error": str(e)}
+
+
+@router.get("/db/query")
+async def query_db_table(
+    table: str,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+    search: Optional[str] = None,
+):
+    """Query database table with pagination"""
+    table_info = None
+    for p_tables in PLATFORM_TABLES.values():
+        for t in p_tables:
+            if t["table"] == table:
+                table_info = t
+                break
+        if table_info:
+            break
+
+    if not table_info:
+        raise HTTPException(status_code=400, detail=f"Unknown table: {table}")
+
+    try:
+        from database.db_session import get_session
+        from sqlalchemy import func, select, inspect, or_, cast, String
+
+        model_cls = _get_model_class(table_info["model"])
+        mapper = inspect(model_cls)
+        columns = [col.key for col in mapper.column_attrs]
+
+        async with get_session() as session:
+            if session is None:
+                raise HTTPException(status_code=500, detail="Database not available")
+
+            count_stmt = select(func.count()).select_from(model_cls)
+            query_stmt = select(model_cls)
+
+            if search:
+                search_conditions = []
+                for col in mapper.columns:
+                    if col.type.python_type in (str,):
+                        search_conditions.append(col.ilike(f"%{search}%"))
+                if search_conditions:
+                    count_stmt = count_stmt.where(or_(*search_conditions))
+                    query_stmt = query_stmt.where(or_(*search_conditions))
+
+            total_res = await session.execute(count_stmt)
+            total = total_res.scalar() or 0
+
+            query_stmt = query_stmt.order_by(model_cls.id.desc())
+            query_stmt = query_stmt.offset((page - 1) * page_size).limit(page_size)
+
+            result = await session.execute(query_stmt)
+            rows = result.scalars().all()
+
+            data = []
+            for row in rows:
+                row_dict = {}
+                for col in columns:
+                    val = getattr(row, col, None)
+                    if val is not None:
+                        row_dict[col] = val
+                    else:
+                        row_dict[col] = None
+                data.append(row_dict)
+
+            return {
+                "data": data,
+                "total": total,
+                "page": page,
+                "page_size": page_size,
+                "total_pages": (total + page_size - 1) // page_size if total > 0 else 0,
+                "columns": columns,
+                "table": table,
+                "label": table_info["label"],
+            }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/db/stats")
+async def get_db_stats():
+    """Get database statistics - total records across all tables"""
+    import config
+    save_option = getattr(config, "SAVE_DATA_OPTION", "json")
+    if save_option in ("json", "csv", "excel"):
+        return {"total_records": 0, "by_platform": {}, "db_type": save_option, "available": False}
+
+    try:
+        from database.db_session import get_session
+        from sqlalchemy import func, select
+
+        total_records = 0
+        by_platform = {}
+
+        async with get_session() as session:
+            if session is None:
+                return {"total_records": 0, "by_platform": {}, "db_type": save_option, "available": False}
+
+            for platform, tables in PLATFORM_TABLES.items():
+                platform_count = 0
+                for table_info in tables:
+                    try:
+                        model_cls = _get_model_class(table_info["model"])
+                        stmt = select(func.count()).select_from(model_cls)
+                        res = await session.execute(stmt)
+                        count = res.scalar() or 0
+                        platform_count += count
+                    except Exception:
+                        continue
+                if platform_count > 0:
+                    by_platform[platform] = platform_count
+                    total_records += platform_count
+
+        return {
+            "total_records": total_records,
+            "by_platform": by_platform,
+            "db_type": save_option,
+            "available": True,
+        }
+
+    except Exception as e:
+        return {"total_records": 0, "by_platform": {}, "db_type": save_option, "available": False, "error": str(e)}
 
 
 @router.get("/cos/check")

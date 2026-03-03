@@ -59,4 +59,7 @@ export {
   useDataFiles,
   useFileContent,
   useDataStats,
+  useDbTables,
+  useDbQuery,
+  useDbStats,
 } from './useData'
