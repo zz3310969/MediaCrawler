@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import {
-  MoreHorizontal,
   Edit2,
   Trash2,
   Zap,
@@ -21,19 +20,19 @@ const statusConfig: Record<ProxyStatus, { label: string; bgColor: string; dotCol
   online: { label: '在线', bgColor: 'bg-emerald-50', dotColor: 'bg-emerald-500' },
   offline: { label: '离线', bgColor: 'bg-red-50', dotColor: 'bg-red-500' },
   testing: { label: '检测中', bgColor: 'bg-amber-50', dotColor: 'bg-amber-500' },
+  banned: { label: '已封禁', bgColor: 'bg-slate-100', dotColor: 'bg-slate-500' },
 };
 
 const protocolConfig: Record<ProxyProtocol, { bgColor: string; textColor: string }> = {
-  HTTP: { bgColor: 'bg-blue-50', textColor: 'text-blue-600' },
-  HTTPS: { bgColor: 'bg-emerald-50', textColor: 'text-emerald-600' },
-  SOCKS5: { bgColor: 'bg-purple-50', textColor: 'text-purple-600' },
+  http: { bgColor: 'bg-blue-50', textColor: 'text-blue-600' },
+  https: { bgColor: 'bg-emerald-50', textColor: 'text-emerald-600' },
+  socks5: { bgColor: 'bg-purple-50', textColor: 'text-purple-600' },
 };
 
 export function ProxyTable({ proxies, onEdit, onDelete, onTest }: ProxyTableProps) {
   const [statusFilter, setStatusFilter] = useState<'all' | ProxyStatus>('all');
   const [protocolFilter, setProtocolFilter] = useState<'all' | ProxyProtocol>('all');
   const [currentPage, setCurrentPage] = useState(1);
-  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const pageSize = 10;
 
   // 筛选代理
@@ -49,10 +48,6 @@ export function ProxyTable({ proxies, onEdit, onDelete, onTest }: ProxyTableProp
     (currentPage - 1) * pageSize,
     currentPage * pageSize
   );
-
-  const handleMenuToggle = (id: string) => {
-    setOpenMenuId(openMenuId === id ? null : id);
-  };
 
   return (
     <div className="bg-white rounded-xl border border-border overflow-hidden flex flex-col h-full">
@@ -87,9 +82,9 @@ export function ProxyTable({ proxies, onEdit, onDelete, onTest }: ProxyTableProp
             className="h-9 px-3 rounded-lg border border-border text-sm text-text-primary bg-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
           >
             <option value="all">全部协议</option>
-            <option value="HTTP">HTTP</option>
-            <option value="HTTPS">HTTPS</option>
-            <option value="SOCKS5">SOCKS5</option>
+            <option value="http">HTTP</option>
+            <option value="https">HTTPS</option>
+            <option value="socks5">SOCKS5</option>
           </select>
         </div>
       </div>
@@ -111,7 +106,7 @@ export function ProxyTable({ proxies, onEdit, onDelete, onTest }: ProxyTableProp
           <tbody>
             {paginatedProxies.map((proxy) => (
               <tr
-                key={proxy.id}
+                key={proxy.proxy_id}
                 className="border-b border-slate-100 hover:bg-slate-50/50 transition-colors"
               >
                 <td className="px-5 py-4">
@@ -123,11 +118,11 @@ export function ProxyTable({ proxies, onEdit, onDelete, onTest }: ProxyTableProp
                   <span
                     className={cn(
                       'inline-flex px-2.5 py-1 rounded-md text-xs font-medium',
-                      protocolConfig[proxy.protocol].bgColor,
-                      protocolConfig[proxy.protocol].textColor
+                      protocolConfig[proxy.protocol]?.bgColor || 'bg-slate-50',
+                      protocolConfig[proxy.protocol]?.textColor || 'text-slate-600'
                     )}
                   >
-                    {proxy.protocol}
+                    {proxy.protocol.toUpperCase()}
                   </span>
                 </td>
                 <td className="px-5 py-4">
@@ -135,12 +130,12 @@ export function ProxyTable({ proxies, onEdit, onDelete, onTest }: ProxyTableProp
                 </td>
                 <td className="px-5 py-4">
                   <span className="text-sm text-text-primary">
-                    {proxy.status === 'online' ? `${proxy.responseTime}ms` : '-'}
+                    {proxy.status === 'online' ? `${proxy.response_time}ms` : '-'}
                   </span>
                 </td>
                 <td className="px-5 py-4">
                   <span className="text-sm text-text-primary">
-                    {proxy.status === 'online' ? `${proxy.successRate}%` : '-'}
+                    {proxy.status === 'online' ? `${proxy.success_rate}%` : '-'}
                   </span>
                 </td>
                 <td className="px-5 py-4">

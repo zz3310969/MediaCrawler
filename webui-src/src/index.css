@@ -1,66 +1,137 @@
+/* Google Fonts - must be first */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
-    --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
-    --primary: 222.2 47.4% 11.2%;
-    --primary-foreground: 210 40% 98%;
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 222.2 84% 4.9%;
-    --radius: 0.5rem;
+    --sidebar-width: 260px;
   }
 
-  .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
-    --primary: 210 40% 98%;
-    --primary-foreground: 222.2 47.4% 11.2%;
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 212.7 26.8% 83.9%;
-  }
-}
-
-@layer base {
   * {
     @apply border-border;
   }
+
+  html, body, #root {
+    @apply h-full;
+  }
+
   body {
-    @apply bg-background text-foreground;
+    @apply bg-white text-text-primary font-sans antialiased;
   }
 }
 
-/* 自定义滚动条样式 */
+@layer components {
+  /* 侧边栏导航项 */
+  .nav-item {
+    @apply flex items-center gap-3 px-4 h-11 rounded-lg text-sm font-normal text-slate-500 transition-colors;
+  }
+  
+  .nav-item:hover {
+    @apply bg-slate-100;
+  }
+  
+  .nav-item-active {
+    @apply bg-primary text-white font-medium;
+  }
+  
+  .nav-item-active:hover {
+    @apply bg-primary;
+  }
+
+  /* 统计卡片 */
+  .stat-card {
+    @apply bg-white rounded-lg border border-border p-6 space-y-3;
+  }
+
+  /* 平台标签 */
+  .platform-tab {
+    @apply flex items-center gap-2 px-4 h-9 rounded-lg text-sm font-normal text-slate-500 transition-colors;
+  }
+  
+  .platform-tab:hover {
+    @apply bg-slate-100;
+  }
+  
+  .platform-tab-active {
+    @apply bg-primary text-white font-medium;
+  }
+
+  /* 任务卡片 */
+  .task-card {
+    @apply bg-white rounded-lg border border-border p-5 space-y-4 transition-shadow hover:shadow-card-hover;
+  }
+
+  /* 数据卡片 */
+  .data-card {
+    @apply bg-white rounded-lg border border-border overflow-hidden transition-shadow hover:shadow-card-hover;
+  }
+
+  /* 表单输入框 */
+  .form-input {
+    @apply h-11 px-4 rounded-lg bg-slate-50 border border-slate-200 text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-colors;
+  }
+
+  /* 表单选择框 */
+  .form-select {
+    @apply h-11 px-4 rounded-lg bg-slate-50 border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-colors appearance-none cursor-pointer;
+  }
+
+  /* 按钮 */
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 px-5 h-10 rounded-lg font-medium text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  
+  .btn-primary {
+    @apply bg-primary text-white hover:bg-primary-600 focus:ring-primary;
+  }
+  
+  .btn-secondary {
+    @apply bg-white text-slate-600 border border-slate-200 hover:bg-slate-50 focus:ring-slate-200;
+  }
+  
+  .btn-success {
+    @apply bg-success text-white hover:bg-success-600 focus:ring-success;
+  }
+  
+  .btn-warning {
+    @apply bg-warning text-white hover:bg-warning-600 focus:ring-warning;
+  }
+  
+  .btn-error {
+    @apply bg-error text-white hover:bg-error-600 focus:ring-error;
+  }
+
+  /* 徽章 */
+  .badge {
+    @apply inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium;
+  }
+  
+  .badge-primary {
+    @apply bg-primary-100 text-primary;
+  }
+  
+  .badge-success {
+    @apply bg-success-100 text-success;
+  }
+  
+  .badge-warning {
+    @apply bg-warning-100 text-warning;
+  }
+  
+  .badge-error {
+    @apply bg-error-100 text-error;
+  }
+  
+  .badge-gray {
+    @apply bg-slate-100 text-slate-500;
+  }
+}
+
 @layer utilities {
-  /* Webkit 浏览器 (Chrome, Safari, Edge) */
+  /* 自定义滚动条样式 */
   .scrollbar-thin::-webkit-scrollbar {
     width: 6px;
     height: 6px;
@@ -71,30 +142,18 @@
   }
   
   .scrollbar-thin::-webkit-scrollbar-thumb {
-    background-color: rgb(203 213 225); /* slate-300 */
+    background-color: rgb(203 213 225);
     border-radius: 9999px;
   }
   
   .scrollbar-thin::-webkit-scrollbar-thumb:hover {
-    background-color: rgb(148 163 184); /* slate-400 */
-  }
-  
-  .dark .scrollbar-thin::-webkit-scrollbar-thumb {
-    background-color: rgb(71 85 105); /* slate-600 */
-  }
-  
-  .dark .scrollbar-thin::-webkit-scrollbar-thumb:hover {
-    background-color: rgb(100 116 139); /* slate-500 */
+    background-color: rgb(148 163 184);
   }
   
   /* Firefox */
   .scrollbar-thin {
     scrollbar-width: thin;
     scrollbar-color: rgb(203 213 225) transparent;
-  }
-  
-  .dark .scrollbar-thin {
-    scrollbar-color: rgb(71 85 105) transparent;
   }
   
   /* 隐藏滚动条但保持滚动功能 */
@@ -106,5 +165,26 @@
     -ms-overflow-style: none;
     scrollbar-width: none;
   }
-}
 
+  /* 文字截断 */
+  .line-clamp-1 {
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 1;
+  }
+  
+  .line-clamp-2 {
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+  
+  .line-clamp-3 {
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+  }
+}

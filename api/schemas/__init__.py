@@ -56,8 +56,73 @@ from .event import (
     LogEntry as TaskLogEntry,
 )
 
+# User schemas
+from .user import (
+    UserRole,
+    UserStatus,
+    UserCreate,
+    UserUpdate,
+    User,
+    LoginRequest,
+    LoginResponse,
+    TokenPayload,
+    UserListRequest,
+    UserListResponse,
+)
+
+# Account schemas
+from .account import (
+    AccountStatus,
+    LoginMethod,
+    Platform,
+    AccountCreate,
+    AccountUpdate,
+    Account,
+    AccountListRequest,
+    AccountListResponse,
+    AccountStats,
+    QRCodeLoginInit,
+    QRCodeLoginStatus,
+    CookieValidateRequest,
+    CookieValidateResponse,
+)
+
+# Dashboard schemas
+from .dashboard import (
+    DashboardStats,
+    SystemStatus,
+    PlatformStats as DashboardPlatformStats,
+    TaskStats,
+    ProxyStats as DashboardProxyStats,
+    AccountStats as DashboardAccountStats,
+    DataStats,
+    DashboardResponse,
+)
+
+# Proxy schemas
+from .proxy import (
+    ProxyInfo,
+    ProxyImportItem,
+    ProxyImportRequest,
+    ProxyImportResponse,
+    ProxyListRequest,
+    ProxyListResponse,
+    ProxyDeleteRequest,
+    ProxyStatusUpdateRequest,
+    BindingInfo,
+    BindingCreateRequest,
+    BindingListResponse,
+    QualityMetrics,
+    ProxyWithQuality,
+    OverviewStats,
+    ProxySettings,
+    GlobalSettings,
+    QualitySettings,
+    FailoverSettings,
+)
+
 __all__ = [
-    # Existing
+    # Existing Crawler
     "PlatformEnum",
     "LoginTypeEnum",
     "CrawlerTypeEnum",
@@ -88,4 +153,57 @@ __all__ = [
     "LogLevel",
     "TaskEvent",
     "TaskLogEntry",
+    # User
+    "UserRole",
+    "UserStatus",
+    "UserCreate",
+    "UserUpdate",
+    "User",
+    "LoginRequest",
+    "LoginResponse",
+    "TokenPayload",
+    "UserListRequest",
+    "UserListResponse",
+    # Account
+    "AccountStatus",
+    "LoginMethod",
+    "Platform",
+    "AccountCreate",
+    "AccountUpdate",
+    "Account",
+    "AccountListRequest",
+    "AccountListResponse",
+    "AccountStats",
+    "QRCodeLoginInit",
+    "QRCodeLoginStatus",
+    "CookieValidateRequest",
+    "CookieValidateResponse",
+    # Dashboard
+    "DashboardStats",
+    "SystemStatus",
+    "DashboardPlatformStats",
+    "TaskStats",
+    "DashboardProxyStats",
+    "DashboardAccountStats",
+    "DataStats",
+    "DashboardResponse",
+    # Proxy
+    "ProxyInfo",
+    "ProxyImportItem",
+    "ProxyImportRequest",
+    "ProxyImportResponse",
+    "ProxyListRequest",
+    "ProxyListResponse",
+    "ProxyDeleteRequest",
+    "ProxyStatusUpdateRequest",
+    "BindingInfo",
+    "BindingCreateRequest",
+    "BindingListResponse",
+    "QualityMetrics",
+    "ProxyWithQuality",
+    "OverviewStats",
+    "ProxySettings",
+    "GlobalSettings",
+    "QualitySettings",
+    "FailoverSettings",
 ]

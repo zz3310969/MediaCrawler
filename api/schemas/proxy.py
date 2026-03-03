@@ -16,16 +16,33 @@ class ProxyInfo(BaseModel):
     port: int
     protocol: str = "http"
     username: Optional[str] = None
-    source: str
+    source: str = "manual"
     country: str = "CN"
     province: Optional[str] = None
     city: Optional[str] = None
     isp: Optional[str] = None
+    status: str = "testing"                     # online/offline/testing
     is_active: bool = True
     quality_score: float = 50.0
+    response_time: int = 0                      # 响应时间(ms)
+    # 质量指标（直接集成，无需单独表）
+    total_requests: int = 0
+    success_requests: int = 0
+    failed_requests: int = 0
+    consecutive_failures: int = 0
+    last_success_at: Optional[int] = None       # 时间戳
+    last_failure_at: Optional[int] = None       # 时间戳
+    last_checked_at: Optional[int] = None       # 时间戳
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     expired_at: Optional[datetime] = None
+    
+    @property
+    def success_rate(self) -> float:
+        """计算成功率"""
+        if self.total_requests == 0:
+            return 0.0
+        return round(self.success_requests / self.total_requests * 100, 2)
 
 
 class ProxyImportItem(BaseModel):
@@ -58,6 +75,18 @@ class ProxyListResponse(BaseModel):
     """代理列表响应"""
     total: int
     items: List[ProxyInfo]
+
+
+class ProxyListRequest(BaseModel):
+    """代理列表查询"""
+    status: Optional[str] = None               # online/offline/testing
+    is_active: Optional[bool] = None
+    source: Optional[str] = None               # manual/api/file
+    country: Optional[str] = None
+    min_quality_score: Optional[float] = None
+    keyword: Optional[str] = None              # 搜索IP
+    page: int = 1
+    page_size: int = 20
 
 
 class ProxyDeleteRequest(BaseModel):

@@ -5,7 +5,7 @@ import { Proxy, ProxyProtocol } from '../../types';
 interface AddProxyModalProps {
   open: boolean;
   onClose: () => void;
-  onSubmit: (proxy: Omit<Proxy, 'id' | 'status' | 'createdAt'>) => void;
+  onSubmit: (proxy: Partial<Proxy>) => void;
   editProxy?: Proxy | null;
 }
 
@@ -18,7 +18,7 @@ export function AddProxyModal({ open, onClose, onSubmit, editProxy }: AddProxyMo
   const [formData, setFormData] = useState({
     ip: '',
     port: '',
-    protocol: 'HTTP' as ProxyProtocol,
+    protocol: 'http' as ProxyProtocol,
     username: '',
     password: '',
     region: '',
@@ -44,7 +44,7 @@ export function AddProxyModal({ open, onClose, onSubmit, editProxy }: AddProxyMo
       setFormData({
         ip: '',
         port: '',
-        protocol: 'HTTP',
+        protocol: 'http',
         username: '',
         password: '',
         region: '',
@@ -148,9 +148,9 @@ export function AddProxyModal({ open, onClose, onSubmit, editProxy }: AddProxyMo
                   onChange={(e) => setFormData({ ...formData, protocol: e.target.value as ProxyProtocol })}
                   className="w-full h-11 px-3.5 pr-10 rounded-lg border border-border text-sm text-text-primary bg-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-colors appearance-none"
                 >
-                  <option value="HTTP">HTTP</option>
-                  <option value="HTTPS">HTTPS</option>
-                  <option value="SOCKS5">SOCKS5</option>
+                  <option value="http">HTTP</option>
+                  <option value="https">HTTPS</option>
+                  <option value="socks5">SOCKS5</option>
                 </select>
                 <ChevronDown className="absolute right-3.5 top-1/2 -translate-y-1/2 w-[18px] h-[18px] text-text-secondary pointer-events-none" />
               </div>

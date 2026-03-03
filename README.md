@@ -244,6 +244,46 @@ MediaCrawler 支持多种数据存储方式，包括 CSV、JSON、Excel、SQLite
 📖 **详细使用说明请查看：[数据存储指南](docs/data_storage_guide.md)**
 
 
+## 🛠️ 自动化工具集 (Skills)
+
+项目内置了三个实用的自动化工具，帮助你更好地管理和监控爬虫系统：
+
+### 🏥 健康检查
+快速检查系统各组件状态（数据库、代理池、账号池、存储空间等）
+
+```bash
+uv run python skills/health_check.py
+```
+
+### 📊 数据统计报告
+生成爬取数据的统计分析报告，包括内容统计、互动分析、性能指标等
+
+```bash
+# 生成小红书平台最近7天的统计报告
+uv run python skills/data_statistics.py --platform xhs --days 7
+```
+
+### 🚀 版本发布
+自动化版本发布流程，包括版本号更新、CHANGELOG 生成、Git 标签创建
+
+```bash
+# 演习模式（不实际修改）
+uv run python skills/version_release.py patch --dry-run
+
+# 正式发布 patch 版本
+uv run python skills/version_release.py patch
+```
+
+### 🎯 快速启动
+使用交互式脚本快速访问所有工具：
+
+```bash
+./skills/run.sh
+```
+
+📖 **详细使用说明请查看：[Skills 使用指南](skills/README.md)**
+
+
 [🚀 MediaCrawlerPro 重磅发布 🚀！更多的功能，更好的架构设计！开源不易，欢迎订阅支持！](https://github.com/MediaCrawlerPro)
 
 

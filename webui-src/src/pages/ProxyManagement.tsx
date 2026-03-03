@@ -9,20 +9,41 @@ import {
   Timer,
   TrendingUp,
   TrendingDown,
+  Loader2,
 } from 'lucide-react';
-import { PageHeader } from '../components/layout';
 import { ProxyTable, AddProxyModal } from '../components/proxy';
-import { useMockData } from '../mock/api';
+import { useProxies, useProxyStats, useCreateProxy, useDeleteProxy, useTestProxy } from '../hooks';
 import { Proxy } from '../types';
 
 export function ProxyManagement() {
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [editProxy, setEditProxy] = useState<Proxy | null>(null);
-  const { proxyStats, proxies } = useMockData();
 
-  const handleAddProxy = (proxyData: Omit<Proxy, 'id' | 'status' | 'createdAt'>) => {
-    console.log('Add proxy:', proxyData);
-    // 实际实现时调用 API
+  // 获取代理列表和统计
+  const { data: proxiesData, loading: proxiesLoading, refetch: refetchProxies } = useProxies({
+    page: 1,
+    page_size: 100,
+  });
+  const { data: proxyStats, loading: statsLoading, refetch: refetchStats } = useProxyStats();
+
+  // 代理操作
+  const { mutate: createProxy } = useCreateProxy();
+  const { mutate: deleteProxy } = useDeleteProxy();
+  const { mutate: testProxy } = useTestProxy();
+
+  const proxies = proxiesData?.items || [];
+  const loading = proxiesLoading || statsLoading;
+
+  const handleAddProxy = async (proxyData: Partial<Proxy>) => {
+    try {
+      await createProxy(proxyData);
+      setAddModalOpen(false);
+      setEditProxy(null);
+      refetchProxies();
+      refetchStats();
+    } catch (err) {
+      console.error('Add proxy failed:', err);
+    }
   };
 
   const handleEditProxy = (proxy: Proxy) => {
@@ -30,24 +51,62 @@ export function ProxyManagement() {
     setAddModalOpen(true);
   };
 
-  const handleDeleteProxy = (proxy: Proxy) => {
-    console.log('Delete proxy:', proxy);
-    // 实际实现时调用 API
+  const handleDeleteProxy = async (proxy: Proxy) => {
+    if (window.confirm(`确定要删除代理 ${proxy.ip}:${proxy.port} 吗？`)) {
+      try {
+        await deleteProxy(proxy.proxy_id);
+        refetchProxies();
+        refetchStats();
+      } catch (err) {
+        console.error('Delete proxy failed:', err);
+      }
+    }
   };
 
-  const handleTestProxy = (proxy: Proxy) => {
-    console.log('Test proxy:', proxy);
-    // 实际实现时调用 API
+  const handleTestProxy = async (proxy: Proxy) => {
+    try {
+      const result = await testProxy(proxy.proxy_id);
+      if (result.success) {
+        alert(`测试成功！响应时间: ${result.response_time}ms`);
+      } else {
+        alert(`测试失败: ${result.error || '未知错误'}`);
+      }
+      refetchProxies();
+    } catch (err) {
+      console.error('Test proxy failed:', err);
+    }
   };
 
   const handleRefresh = () => {
-    console.log('Refresh proxy list');
-    // 实际实现时刷新数据
+    refetchProxies();
+    refetchStats();
   };
 
   const handleImport = () => {
     console.log('Import proxies');
-    // 实际实现时打开导入弹窗
+    // TODO: 打开导入弹窗
+  };
+
+  // 加载状态
+  if (loading && proxies.length === 0) {
+    return (
+      <div className="h-full flex items-center justify-center bg-white">
+        <div className="flex flex-col items-center gap-4">
+          <Loader2 className="w-8 h-8 text-primary animate-spin" />
+          <p className="text-text-secondary">加载代理列表...</p>
+        </div>
+      </div>
+    );
+  }
+
+  const stats = proxyStats || {
+    total: 0,
+    online: 0,
+    offline: 0,
+    testing: 0,
+    banned: 0,
+    avg_response_time: 0,
+    avg_success_rate: 0,
   };
 
   return (
@@ -68,7 +127,7 @@ export function ProxyManagement() {
               onClick={handleRefresh}
               className="w-10 h-10 flex items-center justify-center rounded-lg border border-border hover:bg-slate-50 transition-colors"
             >
-              <RefreshCw className="w-5 h-5 text-text-secondary" />
+              <RefreshCw className={`w-5 h-5 text-text-secondary ${loading ? 'animate-spin' : ''}`} />
             </button>
             <button
               onClick={handleImport}
@@ -82,7 +141,7 @@ export function ProxyManagement() {
                 setEditProxy(null);
                 setAddModalOpen(true);
               }}
-              className="h-10 px-5 flex items-center gap-2 rounded-lg bg-primary text-sm font-medium text-white hover:bg-primary/90 transition-colors"
+              className="h-10 px-5 flex items-center gap-2 rounded-lg bg-primary text-white text-sm font-medium hover:bg-primary/90 transition-colors"
             >
               <Plus className="w-[18px] h-[18px]" />
               添加代理
@@ -101,12 +160,12 @@ export function ProxyManagement() {
               </div>
             </div>
             <div className="font-display text-4xl font-semibold text-text-primary">
-              {proxyStats.total}
+              {stats.total}
             </div>
             <div className="flex items-center gap-1.5">
               <TrendingUp className="w-3.5 h-3.5 text-emerald-500" />
               <span className="text-xs text-emerald-500 font-medium">
-                +{proxyStats.weeklyChange.total} 本周新增
+                {stats.avg_success_rate.toFixed(1)}% 平均成功率
               </span>
             </div>
           </div>
@@ -120,11 +179,11 @@ export function ProxyManagement() {
               </div>
             </div>
             <div className="font-display text-4xl font-semibold text-text-primary">
-              {proxyStats.online}
+              {stats.online}
             </div>
             <div className="flex items-center gap-1.5">
               <span className="text-xs text-emerald-500 font-medium">
-                {((proxyStats.online / proxyStats.total) * 100).toFixed(1)}% 在线率
+                {stats.total > 0 ? ((stats.online / stats.total) * 100).toFixed(1) : 0}% 在线率
               </span>
             </div>
           </div>
@@ -138,12 +197,12 @@ export function ProxyManagement() {
               </div>
             </div>
             <div className="font-display text-4xl font-semibold text-text-primary">
-              {proxyStats.offline}
+              {stats.offline}
             </div>
             <div className="flex items-center gap-1.5">
               <TrendingDown className="w-3.5 h-3.5 text-red-500" />
               <span className="text-xs text-red-500 font-medium">
-                {proxyStats.weeklyChange.offline} 本周减少
+                {stats.banned} 已封禁
               </span>
             </div>
           </div>
@@ -157,12 +216,12 @@ export function ProxyManagement() {
               </div>
             </div>
             <div className="font-display text-4xl font-semibold text-text-primary">
-              {proxyStats.avgResponseTime}ms
+              {stats.avg_response_time}ms
             </div>
             <div className="flex items-center gap-1.5">
               <TrendingUp className="w-3.5 h-3.5 text-emerald-500" />
               <span className="text-xs text-emerald-500 font-medium">
-                {proxyStats.weeklyChange.responseTime}ms 比上周更快
+                {stats.testing} 检测中
               </span>
             </div>
           </div>

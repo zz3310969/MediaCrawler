@@ -153,7 +153,31 @@ class CrawlerAdapter:
             f'SAVE_DATA_OPTION = "{save_option}"',
             "",
         ])
-        
+
+        # 反爬增强配置
+        if config.enable_anti_detect:
+            anti_detect_cfg = config.anti_detect_config or {}
+            lines.extend([
+                "# Anti-detect settings",
+                f"ENABLE_ANTI_DETECT = True",
+                f"ENABLE_FINGERPRINT = {anti_detect_cfg.get('enable_fingerprint', True)}",
+                f"ENABLE_RATE_LIMIT = {anti_detect_cfg.get('enable_rate_limit', True)}",
+                f"ENABLE_HUMAN_BEHAVIOR = {anti_detect_cfg.get('enable_human_behavior', True)}",
+                f"ENABLE_ACCOUNT_HEALTH = {anti_detect_cfg.get('enable_account_health', True)}",
+                f"ENABLE_BINDING = {anti_detect_cfg.get('enable_binding', True)}",
+                f"RATE_LIMIT_MIN_INTERVAL = {anti_detect_cfg.get('rate_limit_min_interval', 3.0)}",
+                f"RATE_LIMIT_MAX_INTERVAL = {anti_detect_cfg.get('rate_limit_max_interval', 10.0)}",
+                f"RATE_LIMIT_HOURLY_LIMIT = {anti_detect_cfg.get('rate_limit_hourly_limit', 150)}",
+                f"RATE_LIMIT_DAILY_LIMIT = {anti_detect_cfg.get('rate_limit_daily_limit', 1500)}",
+                "",
+            ])
+        else:
+            lines.extend([
+                "# Anti-detect settings",
+                "ENABLE_ANTI_DETECT = False",
+                "",
+            ])
+
         # Cookie 配置
         if config.cookies:
             # 转义引号

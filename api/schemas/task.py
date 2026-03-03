@@ -56,7 +56,11 @@ class TaskConfig(BaseModel):
     
     # 存储配置
     save_option: str = "json"                           # json/csv/excel/db/sqlite
-    
+
+    # 反爬增强配置
+    enable_anti_detect: bool = False                    # 是否启用反爬增强
+    anti_detect_config: Optional[Dict[str, Any]] = None # 反爬增强详细配置
+
     # 可扩展字段
     extra: Dict[str, Any] = Field(default_factory=dict)
 
@@ -88,8 +92,13 @@ class TaskMetadata(BaseModel):
 class Task(BaseModel):
     """任务实体"""
     task_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    user_id: Optional[str] = None              # 创建者用户ID
     session_id: str
     task_name: Optional[str] = None
+    
+    # 基本信息
+    platform: Optional[str] = None             # 平台标识（冗余存储便于查询）
+    crawler_type: Optional[str] = None         # 爬取类型（冗余存储便于查询）
     
     # 状态
     status: TaskStatus = TaskStatus.PENDING
@@ -98,6 +107,7 @@ class Task(BaseModel):
     max_retries: int = 3
     idempotency_key: Optional[str] = None      # 幂等键
     cancel_requested: bool = False             # 取消标记
+    error_message: Optional[str] = None        # 错误信息
     
     # 时间
     created_at: datetime = Field(default_factory=datetime.utcnow)
@@ -157,6 +167,9 @@ class TaskListRequest(BaseModel):
     """任务列表查询"""
     status: Optional[TaskStatus] = None
     platform: Optional[str] = None
+    crawler_type: Optional[str] = None
+    user_id: Optional[str] = None
+    keyword: Optional[str] = None              # 搜索任务名称
     page: int = 1
     page_size: int = 20
 

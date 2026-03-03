@@ -1,30 +1,30 @@
 import { PlatformInfo, NavItem } from '../types';
 
-// 平台列表
+// 平台列表（使用后端平台代码）
 export const PLATFORMS: PlatformInfo[] = [
   {
-    id: 'xiaohongshu',
+    id: 'xhs',
     name: '小红书',
     icon: '📕',
     description: '生活方式分享平台',
     color: '#EF4444',
   },
   {
-    id: 'douyin',
+    id: 'dy',
     name: '抖音',
     icon: '🎵',
     description: '短视频分享平台',
     color: '#0D0D0D',
   },
   {
-    id: 'bilibili',
+    id: 'bili',
     name: 'B站',
     icon: '📺',
     description: '视频弹幕网站',
     color: '#FB7185',
   },
   {
-    id: 'weibo',
+    id: 'wb',
     name: '微博',
     icon: '📰',
     description: '社交媒体平台',
@@ -52,7 +52,7 @@ export const PLATFORMS: PlatformInfo[] = [
     color: '#3B82F6',
   },
   {
-    id: 'kuaishou',
+    id: 'ks',
     name: '快手',
     icon: '⚡',
     description: '短视频平台',
@@ -124,12 +124,13 @@ export const DATA_TYPE_OPTIONS = [
   { value: 'video', label: '视频' },
 ];
 
-// 采集模式选项
+// 采集模式选项（对应后端 crawler_type）
 export const CRAWL_MODE_OPTIONS = [
   { value: 'search', label: '关键词搜索' },
-  { value: 'user', label: '指定用户' },
+  { value: 'creator', label: '创作者主页' },
   { value: 'detail', label: '指定内容' },
-  { value: 'hot', label: '热门推荐' },
+  { value: 'creator_vip', label: 'VIP内容（微博）' },
+  { value: 'album', label: '合集模式（微信）' },
 ];
 
 // 任务状态配置
@@ -167,7 +168,7 @@ export const TASK_STATUS_CONFIG = {
 };
 
 // 账号状态配置
-export const ACCOUNT_STATUS_CONFIG = {
+export const ACCOUNT_STATUS_CONFIG: Record<string, { label: string; bgColor: string; textColor: string }> = {
   active: {
     label: '正常',
     bgColor: 'bg-success-100',
@@ -178,15 +179,15 @@ export const ACCOUNT_STATUS_CONFIG = {
     bgColor: 'bg-error-100',
     textColor: 'text-error',
   },
-  pending: {
-    label: '待验证',
-    bgColor: 'bg-warning-100',
-    textColor: 'text-warning',
-  },
   expired: {
     label: '已过期',
     bgColor: 'bg-slate-100',
     textColor: 'text-slate-500',
+  },
+  banned: {
+    label: '已封禁',
+    bgColor: 'bg-red-100',
+    textColor: 'text-red-600',
   },
 };
 

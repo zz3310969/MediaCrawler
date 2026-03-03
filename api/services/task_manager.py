@@ -108,6 +108,8 @@ class TaskManager:
         task = Task(
             session_id=session_id,
             task_name=request.task_name,
+            platform=request.config.platform,  # 冗余存储便于查询
+            crawler_type=request.config.crawler_type,  # 冗余存储便于查询
             config=request.config,
             priority=request.priority,
             scheduled_at=request.scheduled_at,

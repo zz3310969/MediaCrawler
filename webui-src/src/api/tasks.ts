@@ -1,7 +1,11 @@
 /**
  * 任务 API 封装
  */
-import axios, { AxiosInstance } from 'axios';
+import { client } from './client';
+import {
+  setStoredSessionId,
+  clearStoredSessionId,
+} from './session';
 import type { 
   Task, 
   TaskCreateRequest, 
@@ -13,57 +17,8 @@ import type {
   Platform
 } from '../types/task';
 
-// API 客户端
-const api: AxiosInstance = axios.create({
-  baseURL: '/api',
-  withCredentials: true,
-  timeout: 30000,
-});
-
-// Session ID 存储
-const SESSION_ID_KEY = 'mc_session_id';
-
-/**
- * 获取存储的 Session ID
- */
-export function getStoredSessionId(): string | null {
-  return localStorage.getItem(SESSION_ID_KEY);
-}
-
-/**
- * 存储 Session ID
- */
-export function setStoredSessionId(sessionId: string): void {
-  localStorage.setItem(SESSION_ID_KEY, sessionId);
-}
-
-/**
- * 清除 Session ID
- */
-export function clearStoredSessionId(): void {
-  localStorage.removeItem(SESSION_ID_KEY);
-}
-
-// 请求拦截：添加 session header
-api.interceptors.request.use((config) => {
-  const sessionId = getStoredSessionId();
-  if (sessionId) {
-    config.headers['X-Session-ID'] = sessionId;
-  }
-  return config;
-});
-
-// 响应拦截：处理 401 错误
-api.interceptors.response.use(
-  (response) => response,
-  async (error) => {
-    if (error.response?.status === 401) {
-      // Session 过期，清除并尝试重新创建
-      clearStoredSessionId();
-    }
-    return Promise.reject(error);
-  }
-);
+// 重新导出 session 相关函数（保持向后兼容）
+export { setStoredSessionId, clearStoredSessionId } from './session';
 
 // ========== Session API ==========
 
@@ -71,7 +26,7 @@ api.interceptors.response.use(
  * 创建/获取 Session
  */
 export async function createSession(): Promise<SessionResponse> {
-  const res = await api.post<SessionResponse>('/auth/session');
+  const res = await client.post<SessionResponse>('/api/auth/session');
   setStoredSessionId(res.data.session_id);
   return res.data;
 }
@@ -80,7 +35,7 @@ export async function createSession(): Promise<SessionResponse> {
  * 获取当前用户信息
  */
 export async function getCurrentUser(): Promise<SessionResponse> {
-  const res = await api.get<SessionResponse>('/auth/me');
+  const res = await client.get<SessionResponse>('/api/auth/me');
   return res.data;
 }
 
@@ -88,7 +43,7 @@ export async function getCurrentUser(): Promise<SessionResponse> {
  * 登出
  */
 export async function logout(): Promise<void> {
-  await api.post('/auth/logout');
+  await client.post('/api/auth/logout');
   clearStoredSessionId();
 }
 
@@ -96,7 +51,7 @@ export async function logout(): Promise<void> {
  * 刷新 Session
  */
 export async function refreshSession(): Promise<SessionResponse> {
-  const res = await api.post<SessionResponse>('/auth/refresh');
+  const res = await client.post<SessionResponse>('/api/auth/refresh');
   return res.data;
 }
 
@@ -107,7 +62,7 @@ export const tasksApi = {
    * 创建任务
    */
   async create(data: TaskCreateRequest): Promise<Task> {
-    const res = await api.post<Task>('/tasks/', data);
+    const res = await client.post<Task>('/api/tasks/', data);
     return res.data;
   },
 
@@ -120,7 +75,7 @@ export const tasksApi = {
     page?: number;
     page_size?: number;
   }): Promise<TaskListResponse> {
-    const res = await api.get<TaskListResponse>('/tasks/', { params });
+    const res = await client.get<TaskListResponse>('/api/tasks/', { params });
     return res.data;
   },
 
@@ -128,7 +83,7 @@ export const tasksApi = {
    * 获取任务详情
    */
   async get(taskId: string): Promise<Task> {
-    const res = await api.get<Task>(`/tasks/${taskId}`);
+    const res = await client.get<Task>(`/api/tasks/${taskId}`);
     return res.data;
   },
 
@@ -136,7 +91,7 @@ export const tasksApi = {
    * 获取任务统计
    */
   async getStats(): Promise<TaskStats> {
-    const res = await api.get<TaskStats>('/tasks/stats');
+    const res = await client.get<TaskStats>('/api/tasks/stats');
     return res.data;
   },
 
@@ -148,7 +103,7 @@ export const tasksApi = {
     offset?: number;
     level?: string;
   }): Promise<LogEntry[]> {
-    const res = await api.get<LogEntry[]>(`/tasks/${taskId}/logs`, { params });
+    const res = await client.get<LogEntry[]>(`/api/tasks/${taskId}/logs`, { params });
     return res.data;
   },
 
@@ -156,7 +111,7 @@ export const tasksApi = {
    * 取消任务
    */
   async cancel(taskId: string): Promise<{ message: string }> {
-    const res = await api.post<{ message: string }>(`/tasks/${taskId}/cancel`);
+    const res = await client.post<{ message: string }>(`/api/tasks/${taskId}/cancel`);
     return res.data;
   },
 
@@ -164,7 +119,7 @@ export const tasksApi = {
    * 重试任务
    */
   async retry(taskId: string): Promise<Task> {
-    const res = await api.post<Task>(`/tasks/${taskId}/retry`);
+    const res = await client.post<Task>(`/api/tasks/${taskId}/retry`);
     return res.data;
   },
 
@@ -172,7 +127,7 @@ export const tasksApi = {
    * 调整优先级
    */
   async updatePriority(taskId: string, priority: number): Promise<{ message: string }> {
-    const res = await api.patch<{ message: string }>(`/tasks/${taskId}/priority`, null, {
+    const res = await client.patch<{ message: string }>(`/api/tasks/${taskId}/priority`, null, {
       params: { priority }
     });
     return res.data;
@@ -182,10 +137,9 @@ export const tasksApi = {
    * 删除任务
    */
   async delete(taskId: string): Promise<{ message: string }> {
-    const res = await api.delete<{ message: string }>(`/tasks/${taskId}`);
+    const res = await client.delete<{ message: string }>(`/api/tasks/${taskId}`);
     return res.data;
   },
 };
 
 export default tasksApi;
-

@@ -82,24 +82,27 @@ export interface TaskMetadata {
 // 任务实体
 export interface Task {
   task_id: string;
-  session_id: string;
+  session_id?: string;
   task_name?: string;
+  platform: Platform;
+  crawler_type: CrawlerType;
   status: TaskStatus;
   priority: number;
   retry_count: number;
   max_retries: number;
+  error_message?: string;
   idempotency_key?: string;
-  cancel_requested: boolean;
-  created_at: string;
-  scheduled_at?: string;
-  started_at?: string;
-  finished_at?: string;
-  last_heartbeat_at?: string;
+  cancel_requested?: boolean;
+  created_at: number;  // Unix 时间戳
+  scheduled_at?: number;
+  started_at?: number;
+  finished_at?: number;
+  last_heartbeat_at?: number;
   config: TaskConfig;
   progress: TaskProgress;
   result: TaskResult;
-  metadata: TaskMetadata;
-  version: number;
+  metadata?: TaskMetadata;
+  version?: number;
 }
 
 // 创建任务请求

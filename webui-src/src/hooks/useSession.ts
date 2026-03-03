@@ -7,9 +7,11 @@ import {
   createSession, 
   getCurrentUser, 
   logout as apiLogout,
+} from '../api/tasks';
+import {
   getStoredSessionId,
   clearStoredSessionId 
-} from '../api/tasks';
+} from '../api/session';
 import type { SessionResponse } from '../types/task';
 
 interface UseSessionReturn {

@@ -4,7 +4,7 @@
  */
 import { useEffect, useRef, useState, useCallback } from 'react';
 import type { TaskEvent } from '../types/task';
-import { getStoredSessionId } from '../api/tasks';
+import { getStoredSessionId } from '../api/session';
 
 interface UseTaskEventsOptions {
   taskId?: string;

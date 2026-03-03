@@ -48,6 +48,12 @@ from .routers.auth import router as auth_router
 from .routers.tasks import router as tasks_router
 from .routers.ws_tasks import router as ws_tasks_router, setup_event_subscriptions, cleanup_event_subscriptions
 from .routers.proxy import router as proxy_router
+from .routers.anti_detect import router as anti_detect_router
+# WebUI CRUD routers
+from .routers.users import router as users_router
+from .routers.accounts import router as accounts_router
+from .routers.dashboard import router as dashboard_router
+from .routers.system_config import router as system_config_router
 from .middleware.session import SessionMiddleware
 from .services.factory import get_services, get_event_bus
 from .services.task_executor import TaskExecutor, CrawlerFunc, TaskContext
@@ -286,7 +292,12 @@ app = FastAPI(
 # Get webui static files directory
 WEBUI_DIR = os.path.join(os.path.dirname(__file__), "webui")
 
+# Session middleware for multi-task support
+# NOTE: Must be added BEFORE CORSMiddleware so that 401 responses also get CORS headers
+app.add_middleware(SessionMiddleware)
+
 # CORS configuration - allow frontend dev server access
+# NOTE: Added AFTER SessionMiddleware so it wraps all responses including 401
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -299,9 +310,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Session middleware for multi-task support
-app.add_middleware(SessionMiddleware)
 
 # Register routers
 app.include_router(crawler_router, prefix="/api")
@@ -316,6 +324,15 @@ app.include_router(ws_tasks_router)
 
 # Proxy management router
 app.include_router(proxy_router, prefix="/api")
+
+# Anti-detect management router
+app.include_router(anti_detect_router)
+
+# WebUI CRUD management routers
+app.include_router(users_router)          # /api/users
+app.include_router(accounts_router)       # /api/accounts
+app.include_router(dashboard_router)      # /api/dashboard
+app.include_router(system_config_router)  # /api/config
 
 
 @app.get("/")
@@ -491,6 +508,31 @@ if os.path.exists(WEBUI_DIR):
         app.mount("/logos", StaticFiles(directory=logos_dir), name="logos")
     # Mount other static files (e.g., vite.svg)
     app.mount("/static", StaticFiles(directory=WEBUI_DIR), name="webui-static")
+
+
+# SPA fallback route - must be the last route
+# This catches all non-API routes and returns index.html for client-side routing
+@app.get("/{full_path:path}")
+async def spa_fallback(full_path: str):
+    """
+    Fallback route for SPA (Single Page Application).
+    Returns index.html for all non-API routes to support client-side routing.
+    """
+    # Don't intercept API routes
+    if full_path.startswith("api/"):
+        return {"error": "API endpoint not found"}, 404
+
+    # Return index.html for all other routes (SPA routing)
+    index_path = os.path.join(WEBUI_DIR, "index.html")
+    if os.path.exists(index_path):
+        return FileResponse(index_path)
+
+    return {
+        "message": "MediaCrawler WebUI API",
+        "version": "1.0.0",
+        "docs": "/docs",
+        "note": "WebUI not found, please build it first: cd webui-src && npm run build"
+    }
 
 
 if __name__ == "__main__":
