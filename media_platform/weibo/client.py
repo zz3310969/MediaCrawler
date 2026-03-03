@@ -529,7 +529,7 @@ class WeiboClient(ProxyRefreshMixin):
         if poster_url.startswith("//"):
             poster_url = "https:" + poster_url
 
-        async with httpx.AsyncClient(proxy=self.proxy) as client:
+        async with httpx.AsyncClient(proxy=self.proxy, follow_redirects=True) as client:
             try:
                 response = await client.request("GET", poster_url, timeout=self.timeout, headers=self.headers)
                 response.raise_for_status()
